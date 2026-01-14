@@ -13,7 +13,13 @@ namespace AIPipeline.UI
     public class SimpleNodeEditor : MonoBehaviour
     {
         [Header("Settings")]
-        public string serverUrl = "http://localhost:8000/generate";
+        public string baseUrl = "http://localhost:8000";
+        
+        // API 端点
+        private string Text2ImageUrl => $"{baseUrl}/text2image";
+        private string Image2ImageUrl => $"{baseUrl}/image2image";
+        private string Image23DUrl => $"{baseUrl}/image23d";
+        private string Text23DUrl => $"{baseUrl}/text23d";
         
         // UI 元素
         private GameObject editorRoot;
@@ -492,7 +498,11 @@ namespace AIPipeline.UI
                 {
                     isConnecting = true;
                     connectingFromNode = nodeData;
-                    UpdateStatus($"Click on an input port to connect from {nodeData.nodeType}");
+                    UpdateStatus($"Click input port to connect from {nodeData.nodeType} (output: {nodeData.OutputType})");
+                }
+                else
+                {
+                    UpdateStatus("Click output port (right side) first to start connection");
                 }
             }
             else
@@ -500,8 +510,23 @@ namespace AIPipeline.UI
                 // 完成连接（只能连到输入端口）
                 if (isInputPort && connectingFromNode != nodeData)
                 {
-                    CreateConnection(connectingFromNode, nodeData);
-                    UpdateStatus($"Connected {connectingFromNode.nodeType} -> {nodeData.nodeType}");
+                    // 验证连接类型
+                    if (connectingFromNode.CanConnectTo(nodeData, out string error))
+                    {
+                        CreateConnection(connectingFromNode, nodeData);
+                        UpdateStatus($"Connected: {connectingFromNode.nodeType} -> {nodeData.nodeType}");
+                    }
+                    else
+                    {
+                        UpdateStatus($"[X] Connection failed: {error}");
+                    }
+                }
+                else if (!isInputPort)
+                {
+                    // 点击了另一个输出端口，切换起始节点
+                    connectingFromNode = nodeData;
+                    UpdateStatus($"Switched to {nodeData.nodeType} (output: {nodeData.OutputType})");
+                    return;
                 }
                 isConnecting = false;
                 connectingFromNode = null;
@@ -529,6 +554,7 @@ namespace AIPipeline.UI
             line.lineColor = new Color(1f, 0.5f, 0.7f, 0.8f);
             
             from.connectedTo = to;
+            to.connectedFrom = from;  // 记录输入连接
             connections.Add(line);
         }
         
@@ -580,17 +606,82 @@ namespace AIPipeline.UI
                 return;
             }
             
-            StartCoroutine(ExecutePipeline(prompt));
+            StartCoroutine(ExecutePipelineGraph(textInputNode, prompt));
         }
         
-        private System.Collections.IEnumerator ExecutePipeline(string prompt)
+        /// <summary>
+        /// 根据节点连接智能执行管线
+        /// </summary>
+        private System.Collections.IEnumerator ExecutePipelineGraph(NodeData startNode, string prompt)
         {
-            UpdateStatus($"Generating: {prompt}...");
+            UpdateStatus($"Executing pipeline: {prompt}");
             
+            // 遍历节点连接，找到执行路径
+            NodeData currentNode = startNode;
+            object currentData = prompt; // 可以是 string (prompt) 或 byte[] (image/model)
+            
+            while (currentNode != null)
+            {
+                // 找到下一个连接的节点
+                NodeData nextNode = currentNode.connectedTo;
+                
+                if (nextNode == null)
+                {
+                    UpdateStatus("Pipeline complete (no more nodes)");
+                    break;
+                }
+                
+                UpdateStatus($"Processing: {nextNode.nodeType}...");
+                
+                // 根据节点类型执行对应的 API
+                switch (nextNode.nodeType)
+                {
+                    case "Text2Image":
+                        yield return CallText2Image(prompt, (result) => currentData = result);
+                        break;
+                        
+                    case "Image2Image":
+                        if (currentData is byte[] imgData)
+                            yield return CallImage2Image(imgData, prompt, (result) => currentData = result);
+                        else
+                            UpdateStatus("Image2Image needs image input!");
+                        break;
+                        
+                    case "Image23D":
+                        if (currentData is byte[] imgData2)
+                            yield return CallImage23D(imgData2, (result) => currentData = result);
+                        else
+                            UpdateStatus("Image23D needs image input!");
+                        break;
+                        
+                    case "Text23D":
+                        yield return CallText23D(prompt, (result) => currentData = result);
+                        break;
+                        
+                    case "Preview":
+                        // 预览节点：根据数据类型显示
+                        if (currentData is byte[] modelData && modelData.Length > 100)
+                        {
+                            // 假设是 GLB 模型
+                            yield return LoadModel(modelData);
+                        }
+                        break;
+                }
+                
+                currentNode = nextNode;
+            }
+            
+            UpdateStatus("Pipeline finished!");
+        }
+        
+        // ========== API 调用方法 ==========
+        
+        private System.Collections.IEnumerator CallText2Image(string prompt, System.Action<byte[]> onComplete)
+        {
             string jsonBody = $"{{\"prompt\": \"{prompt}\"}}";
             byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonBody);
             
-            using (var request = new UnityEngine.Networking.UnityWebRequest(serverUrl, "POST"))
+            using (var request = new UnityEngine.Networking.UnityWebRequest(Text2ImageUrl, "POST"))
             {
                 request.uploadHandler = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
                 request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
@@ -598,13 +689,65 @@ namespace AIPipeline.UI
                 
                 yield return request.SendWebRequest();
                 
-                if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-                {
-                    UpdateStatus($"Error: {request.error}");
-                    yield break;
-                }
+                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    onComplete?.Invoke(request.downloadHandler.data);
+                else
+                    UpdateStatus($"Text2Image error: {request.error}");
+            }
+        }
+        
+        private System.Collections.IEnumerator CallImage2Image(byte[] imageData, string prompt, System.Action<byte[]> onComplete)
+        {
+            WWWForm form = new WWWForm();
+            form.AddBinaryData("image", imageData, "image.png", "image/png");
+            form.AddField("prompt", prompt);
+            form.AddField("strength", "0.75");
+            
+            using (var request = UnityEngine.Networking.UnityWebRequest.Post(Image2ImageUrl, form))
+            {
+                yield return request.SendWebRequest();
                 
-                yield return LoadModel(request.downloadHandler.data);
+                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    onComplete?.Invoke(request.downloadHandler.data);
+                else
+                    UpdateStatus($"Image2Image error: {request.error}");
+            }
+        }
+        
+        private System.Collections.IEnumerator CallImage23D(byte[] imageData, System.Action<byte[]> onComplete)
+        {
+            WWWForm form = new WWWForm();
+            form.AddBinaryData("image", imageData, "image.png", "image/png");
+            form.AddField("format", "glb");
+            
+            using (var request = UnityEngine.Networking.UnityWebRequest.Post(Image23DUrl, form))
+            {
+                yield return request.SendWebRequest();
+                
+                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    onComplete?.Invoke(request.downloadHandler.data);
+                else
+                    UpdateStatus($"Image23D error: {request.error}");
+            }
+        }
+        
+        private System.Collections.IEnumerator CallText23D(string prompt, System.Action<byte[]> onComplete)
+        {
+            string jsonBody = $"{{\"prompt\": \"{prompt}\"}}";
+            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonBody);
+            
+            using (var request = new UnityEngine.Networking.UnityWebRequest(Text23DUrl, "POST"))
+            {
+                request.uploadHandler = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
+                request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                
+                yield return request.SendWebRequest();
+                
+                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    onComplete?.Invoke(request.downloadHandler.data);
+                else
+                    UpdateStatus($"Text23D error: {request.error}");
             }
         }
         
@@ -623,7 +766,7 @@ namespace AIPipeline.UI
             var instTask = gltf.InstantiateMainSceneAsync(model.transform);
             while (!instTask.IsCompleted) yield return null;
             
-            UpdateStatus("Model generated!");
+            UpdateStatus("Model loaded!");
         }
         
         private void OnClearClicked()
@@ -648,6 +791,17 @@ namespace AIPipeline.UI
     
     // ===== 辅助类 =====
     
+    /// <summary>
+    /// 数据类型枚举
+    /// </summary>
+    public enum DataType
+    {
+        None,       // 无/起始
+        Text,       // 文本 (prompt)
+        Image,      // 图片
+        Model3D     // 3D 模型
+    }
+    
     public class NodeData
     {
         public GameObject gameObject;
@@ -655,7 +809,105 @@ namespace AIPipeline.UI
         public RectTransform inputPort;
         public RectTransform outputPort;
         public TMP_InputField inputField;
-        public NodeData connectedTo;
+        public NodeData connectedTo;      // 输出连接到哪个节点
+        public NodeData connectedFrom;    // 输入来自哪个节点
+        
+        public bool HasIncomingConnection => connectedFrom != null;
+        
+        /// <summary>
+        /// 获取节点的输入类型要求
+        /// </summary>
+        public DataType InputType
+        {
+            get
+            {
+                switch (nodeType)
+                {
+                    case "TextInput":   return DataType.None;     // 无输入
+                    case "ImageInput":  return DataType.None;     // 无输入
+                    case "Text2Image":  return DataType.Text;     // 需要文本
+                    case "Image2Image": return DataType.Image;    // 需要图片
+                    case "Image23D":    return DataType.Image;    // 需要图片
+                    case "Text23D":     return DataType.Text;     // 需要文本
+                    case "Preview":     return DataType.Image | DataType.Model3D; // 图片或模型
+                    default:            return DataType.None;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 获取节点的输出类型
+        /// </summary>
+        public DataType OutputType
+        {
+            get
+            {
+                switch (nodeType)
+                {
+                    case "TextInput":   return DataType.Text;     // 输出文本
+                    case "ImageInput":  return DataType.Image;    // 输出图片
+                    case "Text2Image":  return DataType.Image;    // 输出图片
+                    case "Image2Image": return DataType.Image;    // 输出图片
+                    case "Image23D":    return DataType.Model3D;  // 输出3D模型
+                    case "Text23D":     return DataType.Model3D;  // 输出3D模型
+                    case "Preview":     return DataType.None;     // 终端节点
+                    default:            return DataType.None;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 检查是否可以连接到目标节点
+        /// </summary>
+        public bool CanConnectTo(NodeData target, out string error)
+        {
+            error = "";
+            
+            if (target == null)
+            {
+                error = "Target node is null";
+                return false;
+            }
+            
+            if (target == this)
+            {
+                error = "Cannot connect to self";
+                return false;
+            }
+            
+            // 检查目标节点是否已有输入连接
+            if (target.HasIncomingConnection)
+            {
+                error = $"{target.nodeType} already has an input connection";
+                return false;
+            }
+            
+            // 检查输出类型是否匹配输入类型
+            DataType myOutput = this.OutputType;
+            DataType targetInput = target.InputType;
+            
+            if (myOutput == DataType.None)
+            {
+                error = $"{nodeType} has no output";
+                return false;
+            }
+            
+            if (targetInput == DataType.None)
+            {
+                // 目标不需要输入（如 TextInput）
+                error = $"{target.nodeType} does not accept input";
+                return false;
+            }
+            
+            // 检查类型匹配
+            if ((targetInput & myOutput) == 0)
+            {
+                error = $"Type mismatch: {nodeType}({myOutput}) -> {target.nodeType}({targetInput})";
+                return false;
+            }
+            
+            return true;
+        }
     }
     
     public class NodeDragger : MonoBehaviour, IDragHandler, IBeginDragHandler, IEndDragHandler
