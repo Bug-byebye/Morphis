@@ -51,7 +51,9 @@ cd Morphis
 
 ```bash
 cd Backend
-pip install fastapi uvicorn trimesh numpy
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 python server.py
 ```
 
