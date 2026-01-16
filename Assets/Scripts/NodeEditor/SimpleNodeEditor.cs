@@ -16,7 +16,7 @@ namespace AIPipeline.UI
         public string baseUrl = "http://localhost:8000";
         
         // API 端点
-        private string Text2ImageUrl => $"{baseUrl}/text2image";
+        private string Text2ImageUrl => $"{baseUrl}/text2image/urls";
         private string Image2ImageUrl => $"{baseUrl}/image2image";
         private string Image23DUrl => $"{baseUrl}/image23d";
         private string Text23DUrl => $"{baseUrl}/text23d";
@@ -42,6 +42,9 @@ namespace AIPipeline.UI
         private bool isConnecting = false;
         private NodeData connectingFromNode;
         
+        // Pipeline 错误标记
+        private bool pipelineHasError = false;
+        
         void Start()
         {
             playerInput = FindObjectOfType<PlayerInput>();
@@ -55,6 +58,12 @@ namespace AIPipeline.UI
             if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
             {
                 ToggleEditor();
+            }
+            
+            // M 键切换鼠标显示（用于与场景物体交互）
+            if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame && !isVisible)
+            {
+                ToggleMouseCursor();
             }
             
             if (!isVisible) return;
@@ -114,6 +123,30 @@ namespace AIPipeline.UI
             }
             
             editorRoot.SetActive(isVisible);
+        }
+        
+        // 鼠标交互模式
+        private bool isMouseCursorMode = false;
+        
+        private void ToggleMouseCursor()
+        {
+            isMouseCursorMode = !isMouseCursorMode;
+            
+            if (isMouseCursorMode)
+            {
+                savedLockMode = Cursor.lockState;
+                savedCursorVisible = Cursor.visible;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                // 不禁用 playerInput，让玩家可以继续移动
+                Debug.Log("[NodeEditor] Mouse cursor enabled (M key). Press M again to disable.");
+            }
+            else
+            {
+                Cursor.lockState = savedLockMode;
+                Cursor.visible = savedCursorVisible;
+                Debug.Log("[NodeEditor] Mouse cursor disabled. Press M to enable.");
+            }
         }
         
         private void CreateEditorUI()
@@ -372,7 +405,7 @@ namespace AIPipeline.UI
             node.transform.SetParent(nodeContainer, false);
             
             RectTransform rect = node.AddComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(180, 100);
+            rect.sizeDelta = new Vector2(220, 120); // 更大的节点
             rect.pivot = new Vector2(0, 1);
             
             Image nodeBg = node.AddComponent<Image>();
@@ -387,7 +420,7 @@ namespace AIPipeline.UI
             titleRect.anchorMin = new Vector2(0, 1);
             titleRect.anchorMax = new Vector2(1, 1);
             titleRect.pivot = new Vector2(0.5f, 1);
-            titleRect.sizeDelta = new Vector2(0, 28);
+            titleRect.sizeDelta = new Vector2(0, 32); // 更高的标题栏
             titleRect.anchoredPosition = Vector2.zero;
             
             Image titleBg = titleObj.AddComponent<Image>();
@@ -398,7 +431,7 @@ namespace AIPipeline.UI
             titleText.transform.SetParent(titleObj.transform, false);
             StretchToFill(titleText.GetComponent<RectTransform>());
             titleText.text = nodeType;
-            titleText.fontSize = 13;
+            titleText.fontSize = 15; // 更大的字体
             titleText.fontStyle = FontStyles.Bold;
             titleText.color = Color.white;
             titleText.alignment = TextAlignmentOptions.Center;
@@ -420,6 +453,12 @@ namespace AIPipeline.UI
             if (nodeType == "TextInput")
             {
                 CreateInputField(node, nodeData);
+            }
+            
+            // 如果是 Preview，添加图片预览区域
+            if (nodeType == "Preview")
+            {
+                CreatePreviewArea(node, nodeData);
             }
             
             // 端口点击事件
@@ -446,6 +485,50 @@ namespace AIPipeline.UI
             port.AddComponent<Button>();
             
             return port;
+        }
+        
+        private void CreatePreviewArea(GameObject parent, NodeData nodeData)
+        {
+            // 扩大节点尺寸以容纳预览图
+            RectTransform nodeRect = parent.GetComponent<RectTransform>();
+            nodeRect.sizeDelta = new Vector2(280, 280); // 更大的 Preview 节点
+            
+            GameObject previewArea = new GameObject("PreviewArea");
+            previewArea.transform.SetParent(parent.transform, false);
+            RectTransform previewRect = previewArea.AddComponent<RectTransform>();
+            previewRect.anchorMin = new Vector2(0.08f, 0.08f);
+            previewRect.anchorMax = new Vector2(0.92f, 0.78f);
+            previewRect.offsetMin = Vector2.zero;
+            previewRect.offsetMax = Vector2.zero;
+            
+            // 背景
+            Image previewBg = previewArea.AddComponent<Image>();
+            previewBg.color = new Color(0.15f, 0.15f, 0.18f);
+            
+            // RawImage 用于显示生成的图片
+            GameObject imgObj = new GameObject("PreviewImage");
+            imgObj.transform.SetParent(previewArea.transform, false);
+            RectTransform imgRect = imgObj.AddComponent<RectTransform>();
+            imgRect.anchorMin = Vector2.zero;
+            imgRect.anchorMax = Vector2.one;
+            imgRect.offsetMin = new Vector2(4, 4);
+            imgRect.offsetMax = new Vector2(-4, -4);
+            
+            RawImage rawImage = imgObj.AddComponent<RawImage>();
+            rawImage.color = Color.white;
+            nodeData.previewImage = rawImage;
+            
+            // 占位文字
+            GameObject placeholderObj = new GameObject("Placeholder");
+            placeholderObj.transform.SetParent(previewArea.transform, false);
+            StretchToFill(placeholderObj.AddComponent<RectTransform>());
+            
+            var placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
+            placeholderText.text = "Preview\n(waiting for image)";
+            placeholderText.fontSize = 14; // 更大的字体
+            placeholderText.color = new Color(0.5f, 0.5f, 0.5f);
+            placeholderText.alignment = TextAlignmentOptions.Center;
+            placeholderText.raycastTarget = false;
         }
         
         private void CreateInputField(GameObject parent, NodeData nodeData)
@@ -615,6 +698,7 @@ namespace AIPipeline.UI
         private System.Collections.IEnumerator ExecutePipelineGraph(NodeData startNode, string prompt)
         {
             UpdateStatus($"Executing pipeline: {prompt}");
+            pipelineHasError = false; // Reset error flag
             
             // 遍历节点连接，找到执行路径
             NodeData currentNode = startNode;
@@ -622,6 +706,13 @@ namespace AIPipeline.UI
             
             while (currentNode != null)
             {
+                // 检查是否有错误
+                if (pipelineHasError)
+                {
+                    UpdateStatus("Pipeline stopped due to error!");
+                    yield break;
+                }
+                
                 // 找到下一个连接的节点
                 NodeData nextNode = currentNode.connectedTo;
                 
@@ -638,20 +729,31 @@ namespace AIPipeline.UI
                 {
                     case "Text2Image":
                         yield return CallText2Image(prompt, (result) => currentData = result);
+                        if (pipelineHasError) yield break;
                         break;
                         
                     case "Image2Image":
                         if (currentData is byte[] imgData)
                             yield return CallImage2Image(imgData, prompt, (result) => currentData = result);
                         else
+                        {
                             UpdateStatus("Image2Image needs image input!");
+                            pipelineHasError = true;
+                            yield break;
+                        }
                         break;
                         
                     case "Image23D":
                         if (currentData is byte[] imgData2)
+                        {
                             yield return CallImage23D(imgData2, (result) => currentData = result);
+                        }
                         else
+                        {
                             UpdateStatus("Image23D needs image input!");
+                            pipelineHasError = true;
+                            yield break;
+                        }
                         break;
                         
                     case "Text23D":
@@ -660,10 +762,23 @@ namespace AIPipeline.UI
                         
                     case "Preview":
                         // 预览节点：根据数据类型显示
-                        if (currentData is byte[] modelData && modelData.Length > 100)
+                        if (currentData is byte[] imageOrModelData && imageOrModelData.Length > 100)
                         {
-                            // 假设是 GLB 模型
-                            yield return LoadModel(modelData);
+                            // 检测是图片还是模型
+                            if (IsGLB(imageOrModelData))
+                            {
+                                // 在 Preview 节点内显示 3D 模型
+                                yield return LoadModelInNode(imageOrModelData, nextNode);
+                            }
+                            else
+                            {
+                                // 显示图片到节点内
+                                DisplayImageInNode(imageOrModelData, nextNode);
+                            }
+                        }
+                        else
+                        {
+                            UpdateStatus("Preview node: No valid data to display");
                         }
                         break;
                 }
@@ -671,29 +786,185 @@ namespace AIPipeline.UI
                 currentNode = nextNode;
             }
             
-            UpdateStatus("Pipeline finished!");
+            if (!pipelineHasError)
+            {
+                UpdateStatus("Pipeline finished!");
+            }
+        }
+        
+        private bool IsGLB(byte[] data)
+        {
+            // GLB magic number: 0x46546C67 ("glTF" in little-endian)
+            if (data.Length >= 4)
+            {
+                return data[0] == 0x67 && data[1] == 0x6C && data[2] == 0x54 && data[3] == 0x46;
+            }
+            return false;
+        }
+        
+        /// <summary>
+        /// 在 Preview 节点内显示图片
+        /// </summary>
+        private void DisplayImageInNode(byte[] pngData, NodeData previewNode)
+        {
+            UpdateStatus("Displaying image in Preview node...");
+            
+            Texture2D texture = new Texture2D(2, 2);
+            if (texture.LoadImage(pngData))
+            {
+                // 显示到节点的 RawImage
+                if (previewNode.previewImage != null)
+                {
+                    previewNode.previewImage.texture = texture;
+                    
+                    // 隐藏占位符文字
+                    var placeholder = previewNode.gameObject.GetComponentInChildren<TextMeshProUGUI>();
+                    if (placeholder != null && placeholder.gameObject.name == "Placeholder")
+                    {
+                        placeholder.gameObject.SetActive(false);
+                    }
+                    
+                    UpdateStatus($"Image displayed in node: {texture.width}x{texture.height}");
+                }
+                else
+                {
+                    UpdateStatus("Preview node has no image display!");
+                }
+            }
+            else
+            {
+                UpdateStatus("Failed to load image data");
+            }
+        }
+        
+        /// <summary>
+        /// 在世界空间显示图片（可选，用于"弹出"预览）
+        /// </summary>
+        private System.Collections.IEnumerator DisplayImageInWorld(byte[] pngData)
+        {
+            UpdateStatus("Displaying generated image in world...");
+            
+            // Create texture from PNG data
+            Texture2D texture = new Texture2D(2, 2);
+            if (texture.LoadImage(pngData))
+            {
+                // Create a quad in world space to display the image
+                GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                quad.name = "GeneratedImage_" + System.DateTime.Now.Ticks;
+                
+                // Position in front of camera
+                if (Camera.main != null)
+                {
+                    quad.transform.position = Camera.main.transform.position + Camera.main.transform.forward * 3f;
+                    quad.transform.LookAt(Camera.main.transform);
+                    quad.transform.Rotate(0, 180, 0);
+                }
+                
+                // Scale to match aspect ratio
+                float aspect = (float)texture.width / texture.height;
+                quad.transform.localScale = new Vector3(2f * aspect, 2f, 1f);
+                
+                // Apply texture
+                Material mat = new Material(Shader.Find("Unlit/Texture"));
+                mat.mainTexture = texture;
+                quad.GetComponent<Renderer>().material = mat;
+                
+                // Remove collider
+                var collider = quad.GetComponent<Collider>();
+                if (collider != null) Destroy(collider);
+                
+                UpdateStatus($"Image displayed in world: {texture.width}x{texture.height}");
+            }
+            else
+            {
+                UpdateStatus("Failed to load image data");
+            }
+            
+            yield return null;
         }
         
         // ========== API 调用方法 ==========
         
         private System.Collections.IEnumerator CallText2Image(string prompt, System.Action<byte[]> onComplete)
         {
-            string jsonBody = $"{{\"prompt\": \"{prompt}\"}}";
+            string jsonBody = $"{{\"prompt\": \"{EscapeJson(prompt)}\", \"width\": 1024, \"height\": 1024}}";
             byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonBody);
+            
+            UpdateStatus("Calling Text2Image API...");
             
             using (var request = new UnityEngine.Networking.UnityWebRequest(Text2ImageUrl, "POST"))
             {
                 request.uploadHandler = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
                 request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
                 request.SetRequestHeader("Content-Type", "application/json");
+                request.timeout = 120; // 2 minutes timeout
                 
                 yield return request.SendWebRequest();
                 
-                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
-                    onComplete?.Invoke(request.downloadHandler.data);
-                else
-                    UpdateStatus($"Text2Image error: {request.error}");
+                if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    UpdateStatus($"Text2Image error: {request.error}. Is backend running?");
+                    pipelineHasError = true;
+                    yield break;
+                }
+                
+                // Parse JSON response
+                string responseText = request.downloadHandler.text;
+                Debug.Log($"[Text2Image] Response: {responseText}");
+                
+                var response = JsonUtility.FromJson<Text2ImageResponse>(responseText);
+                
+                if (response.status == "error")
+                {
+                    UpdateStatus($"Text2Image API error: {response.error}");
+                    pipelineHasError = true;
+                    yield break;
+                }
+                
+                if (response.imageUrls == null || response.imageUrls.Length == 0)
+                {
+                    UpdateStatus("No image URLs returned from API");
+                    pipelineHasError = true;
+                    yield break;
+                }
+                
+                // Download the first image
+                string imageUrl = response.imageUrls[0];
+                UpdateStatus("Downloading generated image...");
+                
+                using (var imgRequest = UnityEngine.Networking.UnityWebRequestTexture.GetTexture(imageUrl))
+                {
+                    yield return imgRequest.SendWebRequest();
+                    
+                    if (imgRequest.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                    {
+                        UpdateStatus($"Failed to download image: {imgRequest.error}");
+                        pipelineHasError = true;
+                        yield break;
+                    }
+                    
+                    // Convert texture to PNG bytes
+                    var texture = UnityEngine.Networking.DownloadHandlerTexture.GetContent(imgRequest);
+                    byte[] pngData = texture.EncodeToPNG();
+                    UpdateStatus($"Image downloaded: {texture.width}x{texture.height}");
+                    onComplete?.Invoke(pngData);
+                }
             }
+        }
+        
+        // JSON response class for Text2Image
+        [System.Serializable]
+        private class Text2ImageResponse
+        {
+            public string status;
+            public string error;
+            public string task_id;
+            public string[] imageUrls;
+        }
+        
+        private string EscapeJson(string str)
+        {
+            return str.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
         }
         
         private System.Collections.IEnumerator CallImage2Image(byte[] imageData, string prompt, System.Action<byte[]> onComplete)
@@ -769,6 +1040,263 @@ namespace AIPipeline.UI
             UpdateStatus("Model loaded!");
         }
         
+        /// <summary>
+        /// 在 Preview 节点内显示 3D 模型
+        /// </summary>
+        private System.Collections.IEnumerator LoadModelInNode(byte[] glbData, NodeData previewNode)
+        {
+            UpdateStatus("Loading 3D model in Preview node...");
+            
+            // 保存模型数据用于之后放置到场景
+            previewNode.cachedModelData = glbData;
+            
+            // 清理之前的预览模型和相机
+            if (previewNode.previewModel != null)
+            {
+                Destroy(previewNode.previewModel);
+            }
+            if (previewNode.previewCamera != null)
+            {
+                Destroy(previewNode.previewCamera.gameObject);
+            }
+            
+            // 加载 GLB
+            var gltf = new GLTFast.GltfImport();
+            var loadTask = gltf.LoadGltfBinary(glbData);
+            while (!loadTask.IsCompleted) yield return null;
+            
+            if (!loadTask.Result)
+            {
+                UpdateStatus("Failed to load model");
+                yield break;
+            }
+            
+            // 创建预览环境（远离主场景）
+            Vector3 previewOrigin = new Vector3(1000, 1000, 1000);
+            GameObject modelContainer = new GameObject("PreviewModel_" + previewNode.gameObject.GetInstanceID());
+            modelContainer.transform.position = previewOrigin;
+            previewNode.previewModel = modelContainer;
+            
+            // 实例化模型
+            var instTask = gltf.InstantiateMainSceneAsync(modelContainer.transform);
+            while (!instTask.IsCompleted) yield return null;
+            
+            if (!instTask.Result)
+            {
+                UpdateStatus("Failed to instantiate model");
+                Destroy(modelContainer);
+                yield break;
+            }
+            
+            // 计算边界（世界坐标）
+            Bounds worldBounds = CalculateBounds(modelContainer);
+            float maxSize = Mathf.Max(worldBounds.size.x, worldBounds.size.y, worldBounds.size.z);
+            float scale = (maxSize > 0) ? (2f / maxSize) : 1f;
+            
+            // 计算模型中心相对于 modelContainer 的本地偏移
+            Vector3 localBoundsCenter = modelContainer.transform.InverseTransformPoint(worldBounds.center);
+            
+            // 先缩放
+            modelContainer.transform.localScale = Vector3.one * scale;
+            
+            // 再居中：将本地中心偏移到预览原点
+            modelContainer.transform.position = previewOrigin - localBoundsCenter * scale;
+            
+            // 创建预览相机
+            GameObject camObj = new GameObject("PreviewCamera_" + previewNode.gameObject.GetInstanceID());
+            camObj.transform.position = previewOrigin + new Vector3(0, 0.3f, -5f);
+            camObj.transform.LookAt(previewOrigin);
+            
+            Camera previewCam = camObj.AddComponent<Camera>();
+            previewCam.enabled = true;
+            previewCam.clearFlags = CameraClearFlags.SolidColor;
+            previewCam.backgroundColor = new Color(0.15f, 0.18f, 0.22f);
+            previewCam.cullingMask = -1;
+            previewCam.nearClipPlane = 0.01f;
+            previewCam.farClipPlane = 200f;
+            previewCam.fieldOfView = 35f;
+            previewCam.depth = 50;
+            previewNode.previewCamera = previewCam;
+            
+            // 添加灯光
+            GameObject lightObj = new GameObject("PreviewLight");
+            lightObj.transform.position = previewOrigin + new Vector3(3, 4, -3);
+            lightObj.transform.LookAt(previewOrigin);
+            Light light = lightObj.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.intensity = 1.5f;
+            lightObj.transform.SetParent(modelContainer.transform);
+            
+            // 创建 RenderTexture
+            if (previewNode.previewRT != null)
+            {
+                previewNode.previewRT.Release();
+            }
+            previewNode.previewRT = new RenderTexture(512, 512, 24, RenderTextureFormat.ARGB32);
+            previewNode.previewRT.Create();
+            previewCam.targetTexture = previewNode.previewRT;
+            
+            // 强制相机渲染一帧
+            previewCam.Render();
+            
+            // 显示到节点的 RawImage
+            if (previewNode.previewImage != null)
+            {
+                previewNode.previewImage.texture = previewNode.previewRT;
+                
+                // 隐藏占位符 - 查找所有 TextMeshProUGUI 并隐藏名为 Placeholder 的
+                var allTexts = previewNode.gameObject.GetComponentsInChildren<TextMeshProUGUI>();
+                foreach (var txt in allTexts)
+                {
+                    if (txt.gameObject.name == "Placeholder")
+                    {
+                        txt.gameObject.SetActive(false);
+                        break;
+                    }
+                }
+            }
+            
+            // 添加旋转动画
+            modelContainer.AddComponent<ModelRotator>().rotationSpeed = 25f;
+            
+            // 添加 "Place in Scene" 按钮到节点
+            AddPlaceInSceneButton(previewNode);
+            
+            UpdateStatus("3D Model loaded in Preview node! Click 'Place' to add to scene.");
+        }
+        
+        /// <summary>
+        /// 给 Preview 节点添加 "Place in Scene" 按钮
+        /// </summary>
+        private void AddPlaceInSceneButton(NodeData previewNode)
+        {
+            // 检查是否已存在按钮
+            if (previewNode.placeButton != null) return;
+            
+            // 找到节点的 RectTransform
+            RectTransform nodeRect = previewNode.gameObject.GetComponent<RectTransform>();
+            if (nodeRect == null) return;
+            
+            // 创建按钮
+            GameObject btnObj = new GameObject("PlaceInSceneBtn");
+            btnObj.transform.SetParent(previewNode.gameObject.transform, false);
+            
+            RectTransform btnRect = btnObj.AddComponent<RectTransform>();
+            btnRect.anchorMin = new Vector2(0f, 0f);
+            btnRect.anchorMax = new Vector2(1f, 0f);
+            btnRect.pivot = new Vector2(0.5f, 0f);
+            btnRect.sizeDelta = new Vector2(-10, 25);
+            btnRect.anchoredPosition = new Vector2(0, 5);
+            
+            Image btnImage = btnObj.AddComponent<Image>();
+            btnImage.color = new Color(0.3f, 0.65f, 0.35f);
+            
+            Button btn = btnObj.AddComponent<Button>();
+            btn.targetGraphic = btnImage;
+            btn.onClick.AddListener(() => OnPlaceModelFromNode(previewNode));
+            previewNode.placeButton = btn;
+            
+            // 按钮文字
+            GameObject textObj = new GameObject("Text");
+            textObj.transform.SetParent(btnObj.transform, false);
+            var btnText = textObj.AddComponent<TextMeshProUGUI>();
+            btnText.text = "Place in Scene";
+            btnText.fontSize = 11;
+            btnText.alignment = TextAlignmentOptions.Center;
+            btnText.color = Color.white;
+            RectTransform textRect = textObj.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.sizeDelta = Vector2.zero;
+        }
+        
+        private void OnPlaceModelFromNode(NodeData previewNode)
+        {
+            if (previewNode.cachedModelData == null) return;
+            StartCoroutine(PlaceModelFromNodeCoroutine(previewNode));
+        }
+        
+        private System.Collections.IEnumerator PlaceModelFromNodeCoroutine(NodeData previewNode)
+        {
+            var gltf = new GLTFast.GltfImport();
+            var loadTask = gltf.LoadGltfBinary(previewNode.cachedModelData);
+            while (!loadTask.IsCompleted) yield return null;
+            
+            if (!loadTask.Result) yield break;
+            
+            Vector3 spawnPos = Camera.main.transform.position + Camera.main.transform.forward * 3f;
+            spawnPos.y = 0; // 放在地面上
+            
+            GameObject modelObj = new GameObject("GeneratedModel_" + System.DateTime.Now.Ticks);
+            modelObj.transform.position = spawnPos;
+            
+            var instTask = gltf.InstantiateMainSceneAsync(modelObj.transform);
+            while (!instTask.IsCompleted) yield return null;
+            
+            // 计算边界并调整缩放
+            Bounds bounds = CalculateBounds(modelObj);
+            float maxSize = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
+            if (maxSize > 0)
+            {
+                float targetSize = 1.5f; // 目标大小（米）
+                float scale = targetSize / maxSize;
+                modelObj.transform.localScale = Vector3.one * scale;
+            }
+            
+            // 重新计算边界并居中到地面
+            bounds = CalculateBounds(modelObj);
+            modelObj.transform.position = new Vector3(spawnPos.x, -bounds.min.y, spawnPos.z);
+            
+            // 使用 BoxCollider 代替慢的 MeshCollider
+            BoxCollider boxCollider = modelObj.AddComponent<BoxCollider>();
+            boxCollider.center = bounds.center - modelObj.transform.position;
+            boxCollider.size = bounds.size;
+            
+            // 添加刚体（设为 Kinematic 避免物理计算）
+            Rigidbody rb = modelObj.AddComponent<Rigidbody>();
+            rb.mass = 1f;
+            rb.useGravity = false;
+            rb.isKinematic = true; // 不参与物理模拟，但可以接收点击
+            
+            // 添加交互组件 - 支持留言和光晕
+            InteractableObject interactable = modelObj.AddComponent<InteractableObject>();
+            Debug.Log($"[Interaction] Added InteractableObject to {modelObj.name}");
+            
+            // 确保场景中有 ObjectInteractionManager
+            EnsureInteractionManager();
+            
+            UpdateStatus($"Model placed at {modelObj.transform.position}");
+        }
+        
+        /// <summary>
+        /// 计算物体边界
+        /// </summary>
+        private Bounds CalculateBounds(GameObject obj)
+        {
+            Renderer[] renderers = obj.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0)
+                return new Bounds(obj.transform.position, Vector3.one);
+            
+            Bounds bounds = renderers[0].bounds;
+            foreach (var renderer in renderers)
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+            return bounds;
+        }
+        
+        /// <summary>
+        /// 确保场景中有 ObjectInteractionManager
+        /// </summary>
+        private void EnsureInteractionManager()
+        {
+            if (ObjectInteractionManager.Instance == null)
+            {
+                GameObject managerObj = new GameObject("ObjectInteractionManager");
+                managerObj.AddComponent<ObjectInteractionManager>();
+            }
+        }
+        
         private void OnClearClicked()
         {
             foreach (var node in nodeList)
@@ -809,6 +1337,12 @@ namespace AIPipeline.UI
         public RectTransform inputPort;
         public RectTransform outputPort;
         public TMP_InputField inputField;
+        public RawImage previewImage;     // Preview 节点的图片显示
+        public GameObject previewModel;   // Preview 节点的 3D 模型
+        public Camera previewCamera;      // 预览相机
+        public RenderTexture previewRT;   // 预览渲染纹理
+        public byte[] cachedModelData;    // 缓存的模型数据用于放置到场景
+        public Button placeButton;        // "Place in Scene" 按钮
         public NodeData connectedTo;      // 输出连接到哪个节点
         public NodeData connectedFrom;    // 输入来自哪个节点
         
@@ -977,6 +1511,19 @@ namespace AIPipeline.UI
             vh.AddVert(b + perp, color, Vector2.zero);
             vh.AddTriangle(idx, idx+1, idx+2);
             vh.AddTriangle(idx, idx+2, idx+3);
+        }
+    }
+    
+    /// <summary>
+    /// 模型旋转组件 - 用于 Preview 节点中的 3D 模型预览
+    /// </summary>
+    public class ModelRotator : MonoBehaviour
+    {
+        public float rotationSpeed = 30f;
+        
+        void Update()
+        {
+            transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime, Space.World);
         }
     }
 }

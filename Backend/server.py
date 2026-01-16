@@ -11,6 +11,9 @@ FastAPI 服务：为 Unity 节点编辑器提供各种 AI 生成 API
 - GET  /health         - 健康检查
 """
 
+from dotenv import load_dotenv
+load_dotenv()  # 加载 .env 文件
+
 from fastapi import FastAPI, Response, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -138,6 +141,48 @@ async def api_image23d(
         return Response(content=str(e), status_code=500)
 
 
+@app.post("/text2image/urls")
+async def api_text2image_urls(request: Text2ImageRequest):
+    """
+    文字生成图片 - 返回 URL 列表
+    
+    Request Body:
+        prompt: 正向提示词
+        negative_prompt: 负向提示词 (可选)
+        width: 图片宽度
+        height: 图片高度
+    
+    Returns:
+        JSON 响应，包含图片 URL 列表
+    """
+    print(f"[Text2Image/URLs] Prompt: {request.prompt}")
+    
+    try:
+        size = f"{request.width}x{request.height}"
+        result = await text2image.generate_with_urls(
+            prompt=request.prompt,
+            size=size
+        )
+        return result
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.get("/text2image/task/{task_id}")
+async def api_text2image_task_status(task_id: str):
+    """
+    查询文生图任务状态
+    
+    Args:
+        task_id: 任务 ID
+    
+    Returns:
+        任务状态和图片 URL
+    """
+    from services.text2image import TextToImageService
+    return TextToImageService.get_task_status(task_id)
+
+
 @app.post("/text23d")
 async def api_text23d(request: Text23DRequest):
     """
@@ -185,7 +230,9 @@ async def root():
         "name": "AI Generation Pipeline",
         "version": "1.0.0",
         "endpoints": {
-            "POST /text2image": "文字生成图片",
+            "POST /text2image": "文字生成图片 (返回 PNG)",
+            "POST /text2image/urls": "文字生成图片 (返回 URL 列表)",
+            "GET /text2image/task/{task_id}": "查询文生图任务状态",
             "POST /image2image": "图片转换",
             "POST /image23d": "图片转 3D",
             "POST /text23d": "文字生成 3D",
@@ -200,9 +247,11 @@ if __name__ == "__main__":
     print("AI Generation Pipeline Server")
     print("=" * 50)
     print("Endpoints:")
-    print("  POST /text2image  - 文字生成图片")
-    print("  POST /image2image - 图片转换")
-    print("  POST /image23d    - 图片转 3D")
-    print("  POST /text23d     - 文字生成 3D")
+    print("  POST /text2image       - 文字生成图片 (返回 PNG)")
+    print("  POST /text2image/urls  - 文字生成图片 (返回 URL)")
+    print("  GET  /text2image/task  - 查询任务状态")
+    print("  POST /image2image      - 图片转换")
+    print("  POST /image23d         - 图片转 3D")
+    print("  POST /text23d          - 文字生成 3D")
     print("=" * 50)
     uvicorn.run(app, host="0.0.0.0", port=8000)

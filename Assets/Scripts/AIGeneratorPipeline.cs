@@ -149,7 +149,7 @@ public class AIGeneratorPipeline : MonoBehaviour
     }
     
     /// <summary>
-    /// 使用 glTFast 加载 GLB 数据并实例化
+    /// 使用 glTFast 加载 GLB 数据并在预览窗口显示
     /// </summary>
     private IEnumerator LoadGlbAndInstantiate(byte[] glbData)
     {
@@ -169,30 +169,219 @@ public class AIGeneratorPipeline : MonoBehaviour
             yield break;
         }
         
-        // 计算生成位置（相机前方）
-        Vector3 spawnPosition = Camera.main.transform.position + 
-                                Camera.main.transform.forward * spawnDistance;
+        // 缓存 GLB 数据
+        cachedGlbData = glbData;
         
-        // 创建父物体
-        GameObject modelParent = new GameObject("GeneratedModel_" + DateTime.Now.Ticks);
-        modelParent.transform.position = spawnPosition;
+        // 创建预览环境（远离主场景）
+        CleanupPreview();
+        previewRoot = new GameObject("PreviewEnvironment");
+        previewRoot.transform.position = new Vector3(1000, 1000, 1000);
         
-        // 实例化模型
-        var instantiateTask = gltf.InstantiateMainSceneAsync(modelParent.transform);
+        // 实例化模型到预览环境
+        GameObject modelObj = new GameObject("PreviewModel");
+        modelObj.transform.SetParent(previewRoot.transform);
+        modelObj.transform.localPosition = Vector3.zero;
+        
+        var instantiateTask = gltf.InstantiateMainSceneAsync(modelObj.transform);
         while (!instantiateTask.IsCompleted)
         {
             yield return null;
         }
         
-        if (!instantiateTask.Result)
+        // 调整模型大小
+        Bounds bounds = CalculateBounds(modelObj);
+        float maxSize = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
+        if (maxSize > 0)
         {
-            UpdateStatus("Failed to instantiate model.");
-            Destroy(modelParent);
-            yield break;
+            float scale = 2f / maxSize;
+            modelObj.transform.localScale = Vector3.one * scale;
+            modelObj.transform.localPosition = -bounds.center * scale;
         }
         
-        UpdateStatus("Model generated successfully!");
-        Debug.Log($"[AIGenerator] Model instantiated at {spawnPosition}");
+        // 创建预览相机
+        GameObject camObj = new GameObject("PreviewCamera");
+        camObj.transform.SetParent(previewRoot.transform);
+        camObj.transform.localPosition = new Vector3(0, 0.5f, -4f);
+        camObj.transform.LookAt(previewRoot.transform.position);
+        
+        previewCamera = camObj.AddComponent<Camera>();
+        previewCamera.clearFlags = CameraClearFlags.SolidColor;
+        previewCamera.backgroundColor = new Color(0.15f, 0.15f, 0.18f);
+        previewCamera.fieldOfView = 40f;
+        
+        if (previewRT == null)
+            previewRT = new RenderTexture(400, 400, 24);
+        previewCamera.targetTexture = previewRT;
+        
+        // 添加灯光
+        GameObject lightObj = new GameObject("PreviewLight");
+        lightObj.transform.SetParent(previewRoot.transform);
+        lightObj.transform.localPosition = new Vector3(2, 3, -2);
+        Light light = lightObj.AddComponent<Light>();
+        light.type = LightType.Directional;
+        light.intensity = 1.2f;
+        
+        // 显示预览窗口
+        ShowPreviewWindow();
+        
+        UpdateStatus("Model ready! Check preview window.");
+        Debug.Log($"[AIGenerator] Model loaded in preview window");
+    }
+    
+    // 预览相关变量
+    private byte[] cachedGlbData;
+    private RenderTexture previewRT;
+    private Camera previewCamera;
+    private GameObject previewRoot;
+    private GameObject previewWindow;
+    
+    private void ShowPreviewWindow()
+    {
+        if (previewWindow != null)
+        {
+            previewWindow.SetActive(true);
+            return;
+        }
+        
+        Canvas canvas = FindObjectOfType<Canvas>();
+        if (canvas == null) return;
+        
+        previewWindow = new GameObject("ModelPreviewWindow");
+        previewWindow.transform.SetParent(canvas.transform, false);
+        
+        RectTransform rect = previewWindow.AddComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(420, 500);
+        rect.anchoredPosition = Vector2.zero;
+        
+        Image bg = previewWindow.AddComponent<Image>();
+        bg.color = new Color(0.2f, 0.2f, 0.2f, 0.95f);
+        
+        // 标题
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(previewWindow.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0, 1);
+        titleRect.anchorMax = new Vector2(1, 1);
+        titleRect.pivot = new Vector2(0.5f, 1);
+        titleRect.sizeDelta = new Vector2(0, 40);
+        
+        Image titleBg = titleObj.AddComponent<Image>();
+        titleBg.color = new Color(0.3f, 0.3f, 0.3f);
+        
+        GameObject titleTextObj = new GameObject("Text");
+        titleTextObj.transform.SetParent(titleObj.transform, false);
+        TMP_Text titleText = titleTextObj.AddComponent<TextMeshProUGUI>();
+        titleText.text = "3D Model Preview";
+        titleText.fontSize = 18;
+        titleText.alignment = TextAlignmentOptions.Center;
+        titleText.color = Color.white;
+        titleTextObj.GetComponent<RectTransform>().anchorMin = Vector2.zero;
+        titleTextObj.GetComponent<RectTransform>().anchorMax = Vector2.one;
+        titleTextObj.GetComponent<RectTransform>().sizeDelta = Vector2.zero;
+        
+        // 预览图像
+        GameObject imgObj = new GameObject("Preview");
+        imgObj.transform.SetParent(previewWindow.transform, false);
+        RectTransform imgRect = imgObj.AddComponent<RectTransform>();
+        imgRect.anchorMin = new Vector2(0.5f, 0.5f);
+        imgRect.anchorMax = new Vector2(0.5f, 0.5f);
+        imgRect.sizeDelta = new Vector2(400, 400);
+        imgRect.anchoredPosition = new Vector2(0, 10);
+        
+        RawImage rawImg = imgObj.AddComponent<RawImage>();
+        rawImg.texture = previewRT;
+        
+        // 按钮区域
+        GameObject btnsObj = new GameObject("Buttons");
+        btnsObj.transform.SetParent(previewWindow.transform, false);
+        RectTransform btnsRect = btnsObj.AddComponent<RectTransform>();
+        btnsRect.anchorMin = new Vector2(0, 0);
+        btnsRect.anchorMax = new Vector2(1, 0);
+        btnsRect.pivot = new Vector2(0.5f, 0);
+        btnsRect.sizeDelta = new Vector2(0, 50);
+        
+        HorizontalLayoutGroup hlg = btnsObj.AddComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 10;
+        hlg.padding = new RectOffset(10, 10, 5, 5);
+        hlg.childControlWidth = true;
+        hlg.childForceExpandWidth = true;
+        
+        CreateButton(btnsObj.transform, "Place in Scene", new Color(0.3f, 0.7f, 0.3f), OnPlaceInScene);
+        CreateButton(btnsObj.transform, "Close", new Color(0.5f, 0.5f, 0.5f), OnClosePreview);
+    }
+    
+    private void CreateButton(Transform parent, string text, Color color, UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject btnObj = new GameObject(text);
+        btnObj.transform.SetParent(parent, false);
+        
+        Image img = btnObj.AddComponent<Image>();
+        img.color = color;
+        
+        Button btn = btnObj.AddComponent<Button>();
+        btn.targetGraphic = img;
+        btn.onClick.AddListener(onClick);
+        
+        btnObj.AddComponent<LayoutElement>().preferredHeight = 40;
+        
+        GameObject textObj = new GameObject("Text");
+        textObj.transform.SetParent(btnObj.transform, false);
+        TMP_Text txt = textObj.AddComponent<TextMeshProUGUI>();
+        txt.text = text;
+        txt.fontSize = 16;
+        txt.alignment = TextAlignmentOptions.Center;
+        txt.color = Color.white;
+        textObj.GetComponent<RectTransform>().anchorMin = Vector2.zero;
+        textObj.GetComponent<RectTransform>().anchorMax = Vector2.one;
+        textObj.GetComponent<RectTransform>().sizeDelta = Vector2.zero;
+    }
+    
+    private void OnPlaceInScene()
+    {
+        if (cachedGlbData == null) return;
+        StartCoroutine(PlaceInScene());
+    }
+    
+    private IEnumerator PlaceInScene()
+    {
+        var gltf = new GltfImport();
+        var loadTask = gltf.LoadGltfBinary(cachedGlbData);
+        while (!loadTask.IsCompleted) yield return null;
+        if (!loadTask.Result) yield break;
+        
+        Vector3 pos = Camera.main.transform.position + Camera.main.transform.forward * spawnDistance;
+        GameObject obj = new GameObject("GeneratedModel_" + DateTime.Now.Ticks);
+        obj.transform.position = pos;
+        
+        var instTask = gltf.InstantiateMainSceneAsync(obj.transform);
+        while (!instTask.IsCompleted) yield return null;
+        
+        UpdateStatus("Model placed in scene!");
+        OnClosePreview();
+    }
+    
+    private void OnClosePreview()
+    {
+        if (previewWindow != null) previewWindow.SetActive(false);
+        CleanupPreview();
+    }
+    
+    private void CleanupPreview()
+    {
+        if (previewRoot != null)
+        {
+            Destroy(previewRoot);
+            previewRoot = null;
+        }
+    }
+    
+    private Bounds CalculateBounds(GameObject obj)
+    {
+        Renderer[] renderers = obj.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0) return new Bounds(obj.transform.position, Vector3.one);
+        Bounds b = renderers[0].bounds;
+        foreach (var r in renderers) b.Encapsulate(r.bounds);
+        return b;
     }
     
     /// <summary>
