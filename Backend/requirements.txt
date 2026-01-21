@@ -3,7 +3,7 @@ uvicorn
 trimesh 
 numpy
 python-multipart
-dotenv
+python-dotenv
 httpx
 openai
 volcengine-python-sdk

@@ -14,11 +14,12 @@ FastAPI 服务：为 Unity 节点编辑器提供各种 AI 生成 API
 from dotenv import load_dotenv
 load_dotenv()  # 加载 .env 文件
 
-from fastapi import FastAPI, Response, File, UploadFile, Form
+from fastapi import FastAPI, Response, File, UploadFile, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, List
 import base64
+import secrets
 
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
@@ -48,8 +49,116 @@ class Text23DRequest(BaseModel):
     prompt: str
     format: str = "glb"
 
+class AuthLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class AuthRegisterRequest(BaseModel):
+    username: str
+    password: str
+
+class AuthResponse(BaseModel):
+    token: str
+    username: str
+
+class WorkspaceDto(BaseModel):
+    id: str
+    name: str
+    members: List[str]
+
+class WorkspaceListResponse(BaseModel):
+    items: List[WorkspaceDto]
+
+
+# ========== 简易内存存储（占位实现） ==========
+
+# 默认账号（你要求的 111111/111111）
+_users: Dict[str, str] = {
+    "111111": "111111",
+    "test": "test",
+    "demo": "demo",
+}
+
+# token -> username
+_tokens: Dict[str, str] = {}
+
+# username -> workspaces（先做伪数据；后续可接数据库）
+_workspaces_by_user: Dict[str, List[WorkspaceDto]] = {
+    "111111": [
+        WorkspaceDto(id="ws-love-001", name="恋人空间 001", members=["111111", "partner"]),
+        WorkspaceDto(id="ws-cozy-002", name="小窝 002", members=["111111"]),
+    ],
+    "test": [
+        WorkspaceDto(id="ws-test-001", name="测试空间", members=["test"]),
+    ],
+    "demo": [
+        WorkspaceDto(id="ws-demo-001", name="演示空间", members=["demo", "partner"]),
+    ],
+}
+
+def _require_user(authorization: Optional[str]) -> str:
+    """
+    解析 Authorization: Bearer <token> 并返回 username
+    """
+    if not authorization:
+        raise ValueError("Missing Authorization header")
+    if not authorization.startswith("Bearer "):
+        raise ValueError("Invalid Authorization scheme")
+    token = authorization[len("Bearer "):].strip()
+    username = _tokens.get(token)
+    if not username:
+        raise ValueError("Invalid token")
+    return username
+
 
 # ========== API 端点 ==========
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def auth_login(request: AuthLoginRequest):
+    """
+    登录（占位实现，后续替换为真实鉴权/数据库）
+    """
+    pwd = _users.get(request.username)
+    if pwd is None or pwd != request.password:
+        return Response(content="Invalid username or password", status_code=401)
+    token = secrets.token_urlsafe(24)
+    _tokens[token] = request.username
+    return AuthResponse(token=token, username=request.username)
+
+
+@app.post("/auth/register", response_model=AuthResponse)
+async def auth_register(request: AuthRegisterRequest):
+    """
+    注册（占位实现）
+    """
+    if request.username in _users:
+        return Response(content="Username already exists", status_code=409)
+    if not request.username or not request.password:
+        return Response(content="Username/password required", status_code=400)
+    _users[request.username] = request.password
+    # 给新用户一个默认空间（也可以为空）
+    _workspaces_by_user.setdefault(
+        request.username,
+        [WorkspaceDto(id=f"ws-{request.username}-001", name="我的第一个空间", members=[request.username])]
+    )
+    token = secrets.token_urlsafe(24)
+    _tokens[token] = request.username
+    return AuthResponse(token=token, username=request.username)
+
+
+@app.get("/workspaces", response_model=WorkspaceListResponse)
+async def list_workspaces(authorization: Optional[str] = Header(default=None)):
+    """
+    获取当前账号的 workspace 列表（占位实现）
+    Header:
+      Authorization: Bearer <token>
+    """
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+    return WorkspaceListResponse(items=_workspaces_by_user.get(username, []))
+
 
 @app.post("/text2image")
 async def api_text2image(request: Text2ImageRequest):
@@ -230,6 +339,9 @@ async def root():
         "name": "AI Generation Pipeline",
         "version": "1.0.0",
         "endpoints": {
+            "POST /auth/login": "登录（占位实现）",
+            "POST /auth/register": "注册（占位实现）",
+            "GET /workspaces": "获取 workspace 列表（占位实现，Bearer token）",
             "POST /text2image": "文字生成图片 (返回 PNG)",
             "POST /text2image/urls": "文字生成图片 (返回 URL 列表)",
             "GET /text2image/task/{task_id}": "查询文生图任务状态",
