@@ -26,6 +26,8 @@ namespace AIPipeline.UI
         private CursorLockMode savedLockMode;
         private bool savedCursorVisible;
         private PlayerInput playerInput;
+        private GameObject toggleButtonUI;
+        private TMP_Text toggleButtonText;
         
         void Start()
         {
@@ -40,7 +42,64 @@ namespace AIPipeline.UI
             
             playerInput = FindObjectOfType<PlayerInput>();
             
-            UpdateStatus("Press Tab to open Node Editor");
+            // Create persistent toggle button on top-right corner
+            CreateToggleButton();
+            
+            UpdateStatus("Click the button on top-right to open Node Editor");
+        }
+        
+        private void CreateToggleButton()
+        {
+            // Create a dedicated canvas for the toggle button (don't reuse existing canvas which might be BootCanvas)
+            GameObject canvasObj = new GameObject("EditorToggleCanvas");
+            Canvas canvas = canvasObj.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 500;  // High order to stay on top
+            canvasObj.AddComponent<CanvasScaler>();
+            canvasObj.AddComponent<GraphicRaycaster>();
+            
+            // Create button container
+            toggleButtonUI = new GameObject("EditorToggleButton");
+            toggleButtonUI.transform.SetParent(canvas.transform, false);
+            
+            RectTransform rect = toggleButtonUI.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(1, 1);  // Top-right
+            rect.anchorMax = new Vector2(1, 1);
+            rect.pivot = new Vector2(1, 1);
+            rect.sizeDelta = new Vector2(140, 40);
+            rect.anchoredPosition = new Vector2(-20, -20);  // 20px from top-right corner
+            
+            // Background
+            Image bg = toggleButtonUI.AddComponent<Image>();
+            bg.color = new Color(0.2f, 0.5f, 0.8f, 0.9f);  // Blue button
+            
+            // Button component
+            Button btn = toggleButtonUI.AddComponent<Button>();
+            btn.targetGraphic = bg;
+            btn.onClick.AddListener(ToggleEditor);
+            
+            // Hover effect
+            ColorBlock colors = btn.colors;
+            colors.highlightedColor = new Color(0.3f, 0.6f, 0.9f, 1f);
+            colors.pressedColor = new Color(0.15f, 0.4f, 0.7f, 1f);
+            btn.colors = colors;
+            
+            // Button text
+            GameObject textObj = new GameObject("Text");
+            textObj.transform.SetParent(toggleButtonUI.transform, false);
+            
+            RectTransform textRect = textObj.AddComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.sizeDelta = Vector2.zero;
+            
+            toggleButtonText = textObj.AddComponent<TextMeshProUGUI>();
+            toggleButtonText.text = "🛠 Open Editor";
+            toggleButtonText.fontSize = 14;
+            toggleButtonText.fontStyle = FontStyles.Bold;
+            toggleButtonText.alignment = TextAlignmentOptions.Center;
+            toggleButtonText.color = Color.white;
+            toggleButtonText.raycastTarget = false;
         }
         
         void Update()
@@ -76,6 +135,10 @@ namespace AIPipeline.UI
             
             if (editorRoot != null)
                 editorRoot.SetActive(isVisible);
+            
+            // Update toggle button text
+            if (toggleButtonText != null)
+                toggleButtonText.text = isVisible ? "✕ Close Editor" : "🛠 Open Editor";
         }
         
         private void OnExecuteClicked()

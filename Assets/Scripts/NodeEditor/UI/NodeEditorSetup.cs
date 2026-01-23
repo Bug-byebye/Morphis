@@ -1,12 +1,13 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 using TMPro;
 
 namespace AIPipeline.UI
 {
     /// <summary>
     /// 场景启动时自动创建节点编辑器 UI
-    /// 将此脚本挂载到场景中的任意空物体
+    /// 自动初始化，无需手动添加到场景
     /// </summary>
     public class NodeEditorSetup : MonoBehaviour
     {
@@ -15,6 +16,48 @@ namespace AIPipeline.UI
         
         private GameObject editorRoot;
         private VisualNodeCanvas nodeCanvas;
+        
+        private static NodeEditorSetup instance;
+        
+        /// <summary>
+        /// Auto-initialize when any scene loads (except Boot scene)
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        static void OnSceneLoaded()
+        {
+            SceneManager.sceneLoaded += OnSceneLoadedHandler;
+            // Also check current scene
+            CheckAndSetup();
+        }
+        
+        static void OnSceneLoadedHandler(Scene scene, LoadSceneMode mode)
+        {
+            CheckAndSetup();
+        }
+        
+        static void CheckAndSetup()
+        {
+            // Don't setup if we're in the Boot scene
+            string sceneName = SceneManager.GetActiveScene().name;
+            if (sceneName.Contains("Boot") || sceneName.Contains("Login"))
+                return;
+            
+            // Don't setup if already exists
+            if (instance != null)
+                return;
+            
+            // Skip if BootCanvas is still active (still in login flow)
+            var bootCanvas = GameObject.Find("BootCanvas");
+            if (bootCanvas != null && bootCanvas.activeInHierarchy)
+                return;
+            
+            // Create the setup manager
+            GameObject setupObj = new GameObject("NodeEditorSetup_Auto");
+            instance = setupObj.AddComponent<NodeEditorSetup>();
+            DontDestroyOnLoad(setupObj);
+            
+            Debug.Log("[NodeEditorSetup] Auto-initialized in scene: " + sceneName);
+        }
         
         void Start()
         {

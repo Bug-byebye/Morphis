@@ -68,6 +68,15 @@ namespace StarterAssets
 
 		private void OnApplicationFocus(bool hasFocus)
 		{
+			// Don't lock cursor if Boot UI canvas is active (login/workspace selection)
+			var bootCanvas = GameObject.Find("BootCanvas");
+			if (bootCanvas != null && bootCanvas.activeInHierarchy)
+			{
+				// Boot UI is showing, keep cursor unlocked
+				Cursor.lockState = CursorLockMode.None;
+				Cursor.visible = true;
+				return;
+			}
 			SetCursorState(cursorLocked);
 		}
 

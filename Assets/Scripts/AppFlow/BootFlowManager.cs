@@ -136,21 +136,25 @@ namespace Morphis.AppFlow
             panel.SetActive(false);
 
             var userLabel = CreateText(panel.transform, "Username", 14, FontStyles.Bold);
-            PositionRow(userLabel.rectTransform, y: 360);
-            _usernameInput = CreateInput(panel.transform, "111111");
-            PositionRow(_usernameInput.GetComponent<RectTransform>(), y: 320);
+            var userLabelRect = userLabel.rectTransform;
+            userLabelRect.sizeDelta = new Vector2(420, 24);
+            PositionRow(userLabelRect, y: 140);
+            _usernameInput = CreateInput(panel.transform, "");
+            PositionRow(_usernameInput.GetComponent<RectTransform>(), y: 170);
 
             var pwdLabel = CreateText(panel.transform, "Password", 14, FontStyles.Bold);
-            PositionRow(pwdLabel.rectTransform, y: 260);
-            _passwordInput = CreateInput(panel.transform, "111111", isPassword: true);
-            PositionRow(_passwordInput.GetComponent<RectTransform>(), y: 220);
+            var pwdLabelRect = pwdLabel.rectTransform;
+            pwdLabelRect.sizeDelta = new Vector2(420, 24);
+            PositionRow(pwdLabelRect, y: 230);
+            _passwordInput = CreateInput(panel.transform, "", isPassword: true);
+            PositionRow(_passwordInput.GetComponent<RectTransform>(), y: 260);
 
             _loginBtn = CreateButton(panel.transform, "Login", new Color(0.30f, 0.70f, 0.45f));
-            PositionHalf(_loginBtn.GetComponent<RectTransform>(), left: true, y: 140);
+            PositionHalf(_loginBtn.GetComponent<RectTransform>(), left: true, y: 330);
             _loginBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Login()); });
 
             _registerBtn = CreateButton(panel.transform, "Register", new Color(0.55f, 0.45f, 0.85f));
-            PositionHalf(_registerBtn.GetComponent<RectTransform>(), left: false, y: 140);
+            PositionHalf(_registerBtn.GetComponent<RectTransform>(), left: false, y: 330);
             _registerBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Register()); });
 
             var hint = CreateText(panel.transform, "Note: backend auth is a placeholder (in-memory users).", 12, FontStyles.Italic);
@@ -159,8 +163,8 @@ namespace Morphis.AppFlow
             hintRect.anchorMin = new Vector2(0, 0);
             hintRect.anchorMax = new Vector2(1, 0);
             hintRect.pivot = new Vector2(0.5f, 0);
-            hintRect.sizeDelta = new Vector2(0, 60);
-            hintRect.anchoredPosition = new Vector2(0, 70);
+            hintRect.sizeDelta = new Vector2(0, 40);
+            hintRect.anchoredPosition = new Vector2(0, 20);
             hint.alignment = TextAlignmentOptions.Center;
 
             return panel;
@@ -439,6 +443,13 @@ namespace Morphis.AppFlow
             var btn = CreateButton(_workspaceListRoot, name, new Color(0.25f, 0.25f, 0.32f));
             var rt = btn.GetComponent<RectTransform>();
             rt.sizeDelta = new Vector2(0, 46);
+            
+            // Add LayoutElement for VerticalLayoutGroup to work properly
+            var layoutElement = btn.gameObject.AddComponent<LayoutElement>();
+            layoutElement.minHeight = 46;
+            layoutElement.preferredHeight = 46;
+            layoutElement.flexibleWidth = 1;
+            
             btn.onClick.AddListener(() =>
             {
                 _selectedWorkspaceId = id;

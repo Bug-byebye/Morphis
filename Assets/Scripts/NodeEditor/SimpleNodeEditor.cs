@@ -37,6 +37,11 @@ namespace AIPipeline.UI
         private PlayerInput playerInput;
         private Canvas mainCanvas;
         private Vector2 lastClickPos;
+
+        [Header("Main UI")]
+        [SerializeField] private GameObject mainUICanvas;
+        [SerializeField] private Button openEditorButton;
+        [SerializeField] private TextMeshProUGUI openEditorButtonText;
         
         // 连接模式
         private bool isConnecting = false;
@@ -49,8 +54,77 @@ namespace AIPipeline.UI
         {
             playerInput = FindObjectOfType<PlayerInput>();
             CreateEditorUI();
+            CreateMainUI();
             editorRoot.SetActive(false);
-            Debug.Log("[SimpleNodeEditor] Ready! Press Tab to open.");
+            
+            // Ensure player input is enabled at start
+            if (playerInput != null) playerInput.enabled = true;
+            
+            Debug.Log("[SimpleNodeEditor] Ready! Press Tab or Button to open.");
+        }
+
+        private void CreateMainUI()
+        {
+            // Check if Main UI already exists
+            GameObject canvasObj = GameObject.Find("NodeEditor_MainUI");
+            if (canvasObj != null)
+            {
+                mainUICanvas = canvasObj;
+                Transform btnTrans = mainUICanvas.transform.Find("OpenButton");
+                if (btnTrans != null)
+                {
+                    openEditorButton = btnTrans.GetComponent<Button>();
+                    openEditorButtonText = btnTrans.GetComponentInChildren<TextMeshProUGUI>();
+                    if (openEditorButton != null)
+                    {
+                        openEditorButton.onClick.RemoveAllListeners();
+                        openEditorButton.onClick.AddListener(ToggleEditor);
+                    }
+                }
+                return;
+            }
+
+            // Create Canvas
+            canvasObj = new GameObject("NodeEditor_MainUI");
+            canvasObj.AddComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+            canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            canvasObj.AddComponent<GraphicRaycaster>();
+            mainUICanvas = canvasObj;
+
+            // Create Button
+            GameObject btnObj = new GameObject("OpenButton");
+            btnObj.transform.SetParent(canvasObj.transform, false);
+            
+            Image btnImage = btnObj.AddComponent<Image>();
+            btnImage.color = new Color(0.2f, 0.2f, 0.2f, 0.9f);
+            
+            Button btn = btnObj.AddComponent<Button>();
+            btn.onClick.AddListener(ToggleEditor);
+            openEditorButton = btn;
+
+            // Position Top-Right
+            RectTransform rt = btnObj.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1, 1);
+            rt.anchorMax = new Vector2(1, 1);
+            rt.pivot = new Vector2(1, 1);
+            rt.anchoredPosition = new Vector2(-20, -20);
+            rt.sizeDelta = new Vector2(160, 40);
+
+            // Button Text
+            GameObject txtObj = new GameObject("Text");
+            txtObj.transform.SetParent(btnObj.transform, false);
+            
+            TextMeshProUGUI txt = txtObj.AddComponent<TextMeshProUGUI>();
+            txt.text = "Workflow Station";
+            txt.fontSize = 18;
+            txt.alignment = TextAlignmentOptions.Center;
+            txt.color = Color.white;
+            openEditorButtonText = txt;
+            
+            RectTransform txtRt = txtObj.GetComponent<RectTransform>();
+            txtRt.anchorMin = Vector2.zero;
+            txtRt.anchorMax = Vector2.one;
+            txtRt.sizeDelta = Vector2.zero;
         }
         
         void Update()
@@ -113,6 +187,8 @@ namespace AIPipeline.UI
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 if (playerInput != null) playerInput.enabled = false;
+                
+                if (openEditorButtonText != null) openEditorButtonText.text = "Close Workflow";
             }
             else
             {
@@ -120,6 +196,8 @@ namespace AIPipeline.UI
                 Cursor.visible = savedCursorVisible;
                 if (playerInput != null) playerInput.enabled = true;
                 if (contextMenu != null) contextMenu.SetActive(false);
+                
+                if (openEditorButtonText != null) openEditorButtonText.text = "Workflow Station";
             }
             
             editorRoot.SetActive(isVisible);

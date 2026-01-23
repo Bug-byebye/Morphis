@@ -85,14 +85,14 @@ _tokens: Dict[str, str] = {}
 # username -> workspaces（先做伪数据；后续可接数据库）
 _workspaces_by_user: Dict[str, List[WorkspaceDto]] = {
     "111111": [
-        WorkspaceDto(id="ws-love-001", name="恋人空间 001", members=["111111", "partner"]),
-        WorkspaceDto(id="ws-cozy-002", name="小窝 002", members=["111111"]),
+        WorkspaceDto(id="ws-love-001", name="Couple Space 001", members=["111111", "partner"]),
+        WorkspaceDto(id="ws-cozy-002", name="Cozy Home 002", members=["111111"]),
     ],
     "test": [
-        WorkspaceDto(id="ws-test-001", name="测试空间", members=["test"]),
+        WorkspaceDto(id="ws-test-001", name="Test Workspace", members=["test"]),
     ],
     "demo": [
-        WorkspaceDto(id="ws-demo-001", name="演示空间", members=["demo", "partner"]),
+        WorkspaceDto(id="ws-demo-001", name="Demo Space", members=["demo", "partner"]),
     ],
 }
 
