@@ -25,18 +25,37 @@ namespace AIPipeline.UI
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void OnSceneLoaded()
         {
+            // Don't initialize at startup - wait for scene to fully load after login
             SceneManager.sceneLoaded += OnSceneLoadedHandler;
-            // Also check current scene
-            CheckAndSetup();
         }
         
         static void OnSceneLoadedHandler(Scene scene, LoadSceneMode mode)
         {
+            // Only initialize AFTER a scene is loaded (not on initial load)
+            DelayedCheckAndSetup();
+        }
+        
+        static async void DelayedCheckAndSetup()
+        {
+            // Wait for BootFlowManager to finish
+            await System.Threading.Tasks.Task.Delay(500);
             CheckAndSetup();
         }
         
         static void CheckAndSetup()
         {
+            // Don't setup if BootFlowManager is still active
+            var bootManager = Object.FindFirstObjectByType<Morphis.AppFlow.BootFlowManager>();
+            if (bootManager != null)
+            {
+                var bootCanvas = GameObject.Find("BootCanvas");
+                if (bootCanvas != null && bootCanvas.activeInHierarchy)
+                {
+                    Debug.Log("[NodeEditorSetup] Skipped - BootCanvas still active");
+                    return;
+                }
+            }
+            
             // Don't setup if we're in the Boot scene
             string sceneName = SceneManager.GetActiveScene().name;
             if (sceneName.Contains("Boot") || sceneName.Contains("Login"))
@@ -44,11 +63,6 @@ namespace AIPipeline.UI
             
             // Don't setup if already exists
             if (instance != null)
-                return;
-            
-            // Skip if BootCanvas is still active (still in login flow)
-            var bootCanvas = GameObject.Find("BootCanvas");
-            if (bootCanvas != null && bootCanvas.activeInHierarchy)
                 return;
             
             // Create the setup manager

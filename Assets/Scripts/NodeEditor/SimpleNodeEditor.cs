@@ -55,7 +55,9 @@ namespace AIPipeline.UI
             playerInput = FindObjectOfType<PlayerInput>();
             CreateEditorUI();
             CreateMainUI();
-            editorRoot.SetActive(false);
+            
+            if (editorRoot != null)
+                editorRoot.SetActive(false);
             
             // Ensure player input is enabled at start
             if (playerInput != null) playerInput.enabled = true;
@@ -65,6 +67,9 @@ namespace AIPipeline.UI
 
         private void CreateMainUI()
         {
+            // Hide if in Boot Flow
+            if (GameObject.Find("BootCanvas") != null) return;
+
             // Check if Main UI already exists
             GameObject canvasObj = GameObject.Find("NodeEditor_MainUI");
             if (canvasObj != null)
@@ -178,6 +183,9 @@ namespace AIPipeline.UI
         
         public void ToggleEditor()
         {
+            // If UI not created (e.g. in Login Screen), do nothing
+            if (editorRoot == null) return;
+
             isVisible = !isVisible;
             
             if (isVisible)
@@ -230,6 +238,13 @@ namespace AIPipeline.UI
         private void CreateEditorUI()
         {
             // 主 Canvas
+            // 检查是否在登录流程中（BootCanvas 存在且激活），如果是则暂不显示
+            if (GameObject.Find("BootCanvas") != null)
+            {
+                Debug.Log("[SimpleNodeEditor] BootCanvas detected. Hiding Open Button.");
+                return;
+            }
+
             GameObject canvasObj = new GameObject("SimpleNodeEditorCanvas");
             mainCanvas = canvasObj.AddComponent<Canvas>();
             mainCanvas.renderMode = RenderMode.ScreenSpaceOverlay;

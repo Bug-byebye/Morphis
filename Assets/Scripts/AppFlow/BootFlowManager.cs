@@ -7,6 +7,7 @@ using UnityEngine.Networking;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using System.Linq; // for finding starter assets inputs
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
@@ -26,6 +27,9 @@ namespace Morphis.AppFlow
 
         [Header("Scene")]
         [SerializeField] private string mainSceneName = "Playground";
+        [SerializeField] private Material backgroundSkybox;
+
+        private Camera _skyboxCamera;
 
         private Canvas _canvas;
         private TMP_Text _title;
@@ -51,8 +55,32 @@ namespace Morphis.AppFlow
         private string RegisterUrl => $"{AppSession.BaseUrl}/auth/register";
         private string WorkspacesUrl => $"{AppSession.BaseUrl}/workspaces";
 
+        private static BootFlowManager _instance;
+
         private void Awake()
         {
+            if (_instance != null && _instance != this)
+            {
+                // 冲突解决策略：如果已存在的实例没有 Skybox，而我有，说明我是用户新配置的“更好的”实例。
+                // 此时应该销毁旧的，保留我。
+                if (_instance.backgroundSkybox == null && this.backgroundSkybox != null)
+                {
+                    Debug.Log($"[BootFlow] Replacing existing unconfigured instance ({_instance.name}) with configured instance ({name}).");
+                    Destroy(_instance.gameObject);
+                    _instance = this;
+                }
+                else
+                {
+                    Debug.LogWarning($"[BootFlow] Duplicate BootFlowManager detected on {gameObject.name}. Destroying myself (Instance already exists and is valid).");
+                    Destroy(gameObject);
+                    return;
+                }
+            }
+            else
+            {
+                _instance = this;
+            }
+
             AppSession.BaseUrl = baseUrl;
             DontDestroyOnLoad(gameObject);
         }
@@ -61,6 +89,10 @@ namespace Morphis.AppFlow
         {
             BuildUI();
             ShowLogin();
+            
+            // 初始状态：禁用玩家输入，把控制权给 Login UI，避免光标被抢占
+            SetPlayerInputEnabled(false);
+            
             // 先用英文，避免 TMP 默认字体缺中文导致的警告刷屏；后续我们再接入中文字体资源。
             SetStatus("Enter username/password (default: 111111 / 111111)");
         }
@@ -88,8 +120,20 @@ namespace Morphis.AppFlow
             var bgRect = bg.AddComponent<RectTransform>();
             Stretch(bgRect);
             var bgImg = bg.AddComponent<Image>();
-            // 设为完全不透明，确保启动时看不到后面的场景
-            bgImg.color = new Color(0.06f, 0.06f, 0.08f, 1.0f);
+            
+            if (backgroundSkybox != null)
+            {
+                Debug.Log("[BootFlow] Skybox material FOUND. Setting up transparent background.");
+                // 透明背景，透出后方的 Skybox Camera
+                bgImg.color = Color.clear;
+                SetupSkyboxCamera();
+            }
+            else
+            {
+                Debug.LogWarning("[BootFlow] backgroundSkybox is NULL! Using default dark background.");
+                // 设为完全不透明，确保启动时看不到后面的场景
+                bgImg.color = new Color(0.06f, 0.06f, 0.08f, 1.0f);
+            }
 
             // Root container
             var root = new GameObject("Root");
@@ -98,29 +142,32 @@ namespace Morphis.AppFlow
             rootRect.anchorMin = new Vector2(0.5f, 0.5f);
             rootRect.anchorMax = new Vector2(0.5f, 0.5f);
             rootRect.pivot = new Vector2(0.5f, 0.5f);
-            rootRect.sizeDelta = new Vector2(520, 520);
+            // TARGET: ~1/3 Screen Area. 1920x1080 -> ~640x360 is 1/9 area. 
+            // 1/3 area is huge. Let's go for 1/3 Width (640) and 2/3 Height (720)?
+            // User asked for "1/3 OF THE SCREEN AREA", that implies Sqrt(1/3) linear scale ~= 0.58 width/height.
+            // 1920 * 0.58 = 1100. 1080 * 0.58 = 620.
+            // Let's use 1000 x 800 for a solid block.
+            rootRect.sizeDelta = new Vector2(1000, 800); 
             rootRect.anchoredPosition = Vector2.zero;
 
             // Title
-            _title = CreateText(root.transform, "Morphis", 34, FontStyles.Bold);
+            // Title
+            _title = CreateText(root.transform, "Morphis", 100, FontStyles.Bold); // Even Bigger Title
             var titleRect = _title.GetComponent<RectTransform>();
             titleRect.anchorMin = new Vector2(0, 1);
             titleRect.anchorMax = new Vector2(1, 1);
-            titleRect.pivot = new Vector2(0.5f, 1);
-            titleRect.sizeDelta = new Vector2(0, 60);
-            titleRect.anchoredPosition = new Vector2(0, -20);
+            titleRect.pivot = new Vector2(0.5f, 0); // Pivot Bottom
+            // Move UPWARDS outside the root box. 
+            // Root is 1000x800. Anchor (0.5, 1) is Top Center.
+            // Pos Y=0 is top edge. We want it ABOVE.
+            titleRect.anchoredPosition = new Vector2(0, 20); 
+            titleRect.sizeDelta = new Vector2(0, 120);
             _title.alignment = TextAlignmentOptions.Center;
+            // Add a subtle shadow or outline to make it pop against skybox
+            _title.outlineWidth = 0.2f;
+            _title.outlineColor = new Color(0,0,0,0.5f);
 
-            // Status
-            _status = CreateText(root.transform, "", 14, FontStyles.Normal);
-            var statusRect = _status.GetComponent<RectTransform>();
-            statusRect.anchorMin = new Vector2(0, 0);
-            statusRect.anchorMax = new Vector2(1, 0);
-            statusRect.pivot = new Vector2(0.5f, 0);
-            statusRect.sizeDelta = new Vector2(0, 60);
-            statusRect.anchoredPosition = new Vector2(0, 16);
-            _status.alignment = TextAlignmentOptions.Center;
-            _status.color = new Color(1f, 0.8f, 0.9f, 0.95f);
+
 
             // Panels
             _loginPanel = BuildLoginPanel(root.transform);
@@ -130,42 +177,102 @@ namespace Morphis.AppFlow
             SetCursorForUI(true);
         }
 
+        private void SetupSkyboxCamera()
+        {
+            if (_skyboxCamera != null) return;
+
+            var camGO = new GameObject("BootSkyboxCamera");
+            // 挂在 BootFlowManager 下面，随之一起 DontDestroyOnLoad
+            camGO.transform.SetParent(this.transform);
+            
+            _skyboxCamera = camGO.AddComponent<Camera>();
+            _skyboxCamera.clearFlags = CameraClearFlags.Skybox;
+            _skyboxCamera.depth = 0; 
+            
+            var skybox = camGO.AddComponent<Skybox>();
+            skybox.material = backgroundSkybox;
+            
+            _skyboxCamera.cullingMask = 0; 
+            
+            camGO.AddComponent<SkyboxRotator>(); 
+        }
+
+        public class SkyboxRotator : MonoBehaviour
+        {
+            void Update()
+            {
+                transform.Rotate(Vector3.up * 1.5f * Time.deltaTime);
+            }
+        }
+
         private GameObject BuildLoginPanel(Transform parent)
         {
             var panel = CreatePanel(parent, "LoginPanel");
             panel.SetActive(false);
 
-            var userLabel = CreateText(panel.transform, "Username", 14, FontStyles.Bold);
+            // Layout Constants for BIG UI
+            float contentWidth = 800;
+            float inputHeight = 80;
+            float labelHeight = 50;
+            float fontSizeLabel = 32;
+            float buttonHeight = 90;
+            
+            float startY = 160; 
+            float gap = 40;
+
+            // ============ Username ============
+            // Label
+            var userLabel = CreateText(panel.transform, "Username", fontSizeLabel, FontStyles.Bold);
             var userLabelRect = userLabel.rectTransform;
-            userLabelRect.sizeDelta = new Vector2(420, 24);
-            PositionRow(userLabelRect, y: 140);
+            userLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
+            userLabelRect.anchorMin = new Vector2(0.5f, 1);
+            userLabelRect.anchorMax = new Vector2(0.5f, 1);
+            userLabelRect.pivot = new Vector2(0, 1);
+            // Left align relative to center: -HalfWidth
+            userLabelRect.anchoredPosition = new Vector2(-contentWidth/2, -startY); 
+            userLabel.alignment = TextAlignmentOptions.BottomLeft;
+
+            // Input
             _usernameInput = CreateInput(panel.transform, "");
-            PositionRow(_usernameInput.GetComponent<RectTransform>(), y: 170);
+            var userInRt = _usernameInput.GetComponent<RectTransform>();
+            userInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
+            PositionRow(userInRt, y: startY + labelHeight + 10); // 10px padding
 
-            var pwdLabel = CreateText(panel.transform, "Password", 14, FontStyles.Bold);
+            // ============ Password ============
+            float passY = startY + labelHeight + inputHeight + gap;
+            
+            // Label
+            var pwdLabel = CreateText(panel.transform, "Password", fontSizeLabel, FontStyles.Bold);
             var pwdLabelRect = pwdLabel.rectTransform;
-            pwdLabelRect.sizeDelta = new Vector2(420, 24);
-            PositionRow(pwdLabelRect, y: 230);
-            _passwordInput = CreateInput(panel.transform, "", isPassword: true);
-            PositionRow(_passwordInput.GetComponent<RectTransform>(), y: 260);
+            pwdLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
+            pwdLabelRect.anchorMin = new Vector2(0.5f, 1);
+            pwdLabelRect.anchorMax = new Vector2(0.5f, 1);
+            pwdLabelRect.pivot = new Vector2(0, 1);
+            pwdLabelRect.anchoredPosition = new Vector2(-contentWidth/2, -passY); // Gap from username input
+            pwdLabel.alignment = TextAlignmentOptions.BottomLeft;
 
+            // Input
+            _passwordInput = CreateInput(panel.transform, "", isPassword: true);
+            var pwdInRt = _passwordInput.GetComponent<RectTransform>();
+            pwdInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
+            PositionRow(pwdInRt, y: passY + labelHeight + 10);
+
+            // ============ Buttons ============
+            float btnY = passY + labelHeight + inputHeight + gap * 2;
+            
             _loginBtn = CreateButton(panel.transform, "Login", new Color(0.30f, 0.70f, 0.45f));
-            PositionHalf(_loginBtn.GetComponent<RectTransform>(), left: true, y: 330);
+            var loginRt = _loginBtn.GetComponent<RectTransform>();
+            loginRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight); 
+            PositionHalf(loginRt, left: true, y: btnY); 
             _loginBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Login()); });
+            _loginBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 36; 
 
             _registerBtn = CreateButton(panel.transform, "Register", new Color(0.55f, 0.45f, 0.85f));
-            PositionHalf(_registerBtn.GetComponent<RectTransform>(), left: false, y: 330);
+            var regRt = _registerBtn.GetComponent<RectTransform>();
+            regRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
+            PositionHalf(regRt, left: false, y: btnY);
             _registerBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Register()); });
-
-            var hint = CreateText(panel.transform, "Note: backend auth is a placeholder (in-memory users).", 12, FontStyles.Italic);
-            hint.color = new Color(1f, 1f, 1f, 0.7f);
-            var hintRect = hint.GetComponent<RectTransform>();
-            hintRect.anchorMin = new Vector2(0, 0);
-            hintRect.anchorMax = new Vector2(1, 0);
-            hintRect.pivot = new Vector2(0.5f, 0);
-            hintRect.sizeDelta = new Vector2(0, 40);
-            hintRect.anchoredPosition = new Vector2(0, 20);
-            hint.alignment = TextAlignmentOptions.Center;
+            _registerBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 36;
 
             return panel;
         }
@@ -192,8 +299,10 @@ namespace Morphis.AppFlow
             listRect.pivot = new Vector2(0.5f, 0.5f);
             listRect.sizeDelta = new Vector2(480, 260);
             listRect.anchoredPosition = new Vector2(0, 40);
-            var listBg = listBox.AddComponent<Image>();
-            listBg.color = new Color(0.12f, 0.12f, 0.16f, 1f);
+            
+            // Removed inner background image to avoid "double frame" look
+            // var listBg = listBox.AddComponent<Image>();
+            // listBg.color = new Color(0.12f, 0.12f, 0.16f, 1f);
 
             var layout = listBox.AddComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(12, 12, 12, 12);
@@ -368,6 +477,14 @@ namespace Morphis.AppFlow
 
             var sceneToLoad = GetSceneNameForWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
             var op = SceneManager.LoadSceneAsync(sceneToLoad, LoadSceneMode.Single);
+            
+            if (op == null)
+            {
+                SetStatus($"Error: Scene '{sceneToLoad}' not found! Add it to Build Settings.");
+                _busy = false;
+                yield break;
+            }
+            
             while (!op.isDone)
             {
                 yield return null;
@@ -375,10 +492,35 @@ namespace Morphis.AppFlow
 
             // 进入主场景后隐藏 UI（也可以销毁）
             if (_canvas != null) _canvas.gameObject.SetActive(false);
+            if (_skyboxCamera != null) _skyboxCamera.gameObject.SetActive(false);
 
             // 主场景默认是第三人称：把鼠标锁回去（玩家可用右键/Tab 等切换 UI 时再解锁）
             SetCursorForUI(false);
+            SetPlayerInputEnabled(true);
             _busy = false;
+        }
+
+        private void SetPlayerInputEnabled(bool enabled)
+        {
+#if ENABLE_INPUT_SYSTEM
+            var playerInputs = FindObjectsOfType<UnityEngine.InputSystem.PlayerInput>();
+            foreach (var pi in playerInputs)
+            {
+                pi.enabled = enabled;
+            }
+#endif
+            // 尝试禁用 StarterAssetsInputs（它是 MonoBehaviour，负责光标锁定逻辑）
+            var starterInputs = FindObjectsOfType<MonoBehaviour>().Where(m => m.GetType().Name == "StarterAssetsInputs").ToArray();
+            foreach (var si in starterInputs)
+            {
+                si.enabled = enabled;
+                if (!enabled)
+                {
+                    // 强制解锁光标
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                }
+            }
         }
 
         // ===== workspace list UI =====
@@ -475,22 +617,31 @@ namespace Morphis.AppFlow
 
         private static void EnsureEventSystem()
         {
-            if (UnityEngine.Object.FindFirstObjectByType<EventSystem>() != null) return;
+            var es = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
+            if (es == null)
+            {
+                var go = new GameObject("EventSystem");
+                es = go.AddComponent<EventSystem>();
+                UnityEngine.Object.DontDestroyOnLoad(go);
+            }
 
-            var es = new GameObject("EventSystem");
-            es.AddComponent<EventSystem>();
-
+            // check input module
 #if ENABLE_INPUT_SYSTEM
-            // 如果工程使用新 Input System（StarterAssets 通常如此），必须用 InputSystemUIInputModule
-            // 否则 UI 会出现“按钮不可点/输入框不可选”的情况。
-            var uiModule = es.AddComponent<InputSystemUIInputModule>();
-            uiModule.actionsAsset = CreateMinimalUIActions();
-#else
-            // 旧输入系统兜底
-            es.AddComponent<StandaloneInputModule>();
-#endif
+            if (es.GetComponent<InputSystemUIInputModule>() == null)
+            {
+                // Remove old module if exists
+                var old = es.GetComponent<StandaloneInputModule>();
+                if (old != null) DestroyImmediate(old);
 
-            UnityEngine.Object.DontDestroyOnLoad(es);
+                var uiModule = es.gameObject.AddComponent<InputSystemUIInputModule>();
+                uiModule.actionsAsset = CreateMinimalUIActions();
+            }
+#else
+            if (es.GetComponent<StandaloneInputModule>() == null)
+            {
+                 es.gameObject.AddComponent<StandaloneInputModule>();
+            }
+#endif
         }
 
 #if ENABLE_INPUT_SYSTEM
@@ -606,23 +757,30 @@ namespace Morphis.AppFlow
             var textRT = textGO.AddComponent<RectTransform>();
             Stretch(textRT);
             var text = textGO.AddComponent<TextMeshProUGUI>();
-            text.fontSize = 16;
+            text.fontSize = 36; // Big!
             text.color = Color.white;
             text.alignment = TextAlignmentOptions.MidlineLeft;
+            input.textComponent = text;
+            input.textViewport = textAreaRT;
 
-            var phGO = new GameObject("Placeholder");
-            phGO.transform.SetParent(textArea.transform, false);
-            var phRT = phGO.AddComponent<RectTransform>();
-            Stretch(phRT);
-            var ph = phGO.AddComponent<TextMeshProUGUI>();
-            ph.text = placeholder;
-            ph.fontSize = 16;
-            ph.color = new Color(1, 1, 1, 0.5f);
-            ph.alignment = TextAlignmentOptions.MidlineLeft;
+            // Placeholder
+            if (!string.IsNullOrEmpty(placeholder))
+            {
+                var phGO = new GameObject("Placeholder");
+                phGO.transform.SetParent(textArea.transform, false);
+                var phRT = phGO.AddComponent<RectTransform>();
+                Stretch(phRT);
+                var phText = phGO.AddComponent<TextMeshProUGUI>();
+                phText.text = placeholder;
+                phText.fontSize = 36; // Big!
+                phText.color = new Color(1f, 1f, 1f, 0.5f);
+                phText.fontStyle = FontStyles.Italic;
+                phText.alignment = TextAlignmentOptions.MidlineLeft;
+                input.placeholder = phText;
+            }
 
             input.textViewport = textAreaRT;
             input.textComponent = text;
-            input.placeholder = ph;
             input.contentType = isPassword ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
 
             return input;
