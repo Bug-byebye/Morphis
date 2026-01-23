@@ -1402,6 +1402,24 @@ namespace AIPipeline.UI
             // 确保场景中有 ObjectInteractionManager
             EnsureInteractionManager();
             
+            // 保存模型文件到 Assets/Resources/Placeables
+            string resourcesPath = Application.dataPath + "/Resources/Placeables";
+            if (!System.IO.Directory.Exists(resourcesPath))
+            {
+                System.IO.Directory.CreateDirectory(resourcesPath);
+            }
+            string filename = $"generated_{System.DateTime.Now.Ticks}.glb";
+            string fullPath = System.IO.Path.Combine(resourcesPath, filename);
+            try 
+            {
+                System.IO.File.WriteAllBytes(fullPath, previewNode.cachedModelData);
+                Debug.Log($"[NodeEditor] Saved generated model to: {fullPath}");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[NodeEditor] Failed to save model file: {e.Message}");
+            }
+            
             UpdateStatus($"Model placed at {modelObj.transform.position}");
         }
         
