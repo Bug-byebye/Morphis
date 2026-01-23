@@ -19,6 +19,9 @@ public class ObjectInteractionManager : MonoBehaviour
     // 当前交互的对象
     private InteractableObject currentTarget;
     private InteractableObject hoveredObject;
+    private InteractableObject draggingObject;
+    private Vector3 dragOffset;
+    private float dragGroundY = 0f;
     
     void Awake()
     {
@@ -40,19 +43,28 @@ public class ObjectInteractionManager : MonoBehaviour
         CreateTooltipPanel();
     }
     
-    void FindOrCreateCanvas()
-    {
-        mainCanvas = FindObjectOfType<Canvas>();
-        if (mainCanvas == null)
+        void FindOrCreateCanvas()
         {
-            GameObject canvasObj = new GameObject("InteractionCanvas");
-            mainCanvas = canvasObj.AddComponent<Canvas>();
-            mainCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            mainCanvas.sortingOrder = 100;
-            canvasObj.AddComponent<CanvasScaler>();
-            canvasObj.AddComponent<GraphicRaycaster>();
+            // 优先寻找一个已经存在的 ScreenSpaceOverlay Canvas，避免和 BootFlow/NodeEditor 等 UI 冲突
+            foreach (var c in FindObjectsOfType<Canvas>())
+            {
+                if (c.renderMode == RenderMode.ScreenSpaceOverlay)
+                {
+                    mainCanvas = c;
+                    break;
+                }
+            }
+
+            if (mainCanvas == null)
+            {
+                GameObject canvasObj = new GameObject("InteractionCanvas");
+                mainCanvas = canvasObj.AddComponent<Canvas>();
+                mainCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                mainCanvas.sortingOrder = 100;
+                canvasObj.AddComponent<CanvasScaler>();
+                canvasObj.AddComponent<GraphicRaycaster>();
+            }
         }
-    }
     
     void CreateCommentDialog()
     {
@@ -219,7 +231,7 @@ public class ObjectInteractionManager : MonoBehaviour
     
     void Update()
     {
-        // 处理交互逻辑
+        // 处理交互逻辑（点击 / 悬浮 / 拖拽）
         HandleInteraction();
         
         // 更新 tooltip 位置跟随鼠标
@@ -238,26 +250,50 @@ public class ObjectInteractionManager : MonoBehaviour
         
         // 获取鼠标位置 (兼容新输入系统)
         Vector2 mousePos = Vector2.zero;
-        bool leftClick = false;
+        bool leftClickDown = false;
+        bool leftClickHeld = false;
+        bool leftClickUp = false;
+        bool rightClickDown = false;
         
         if (UnityEngine.InputSystem.Mouse.current != null)
         {
             mousePos = UnityEngine.InputSystem.Mouse.current.position.ReadValue();
-            leftClick = UnityEngine.InputSystem.Mouse.current.leftButton.wasPressedThisFrame;
+            leftClickDown = UnityEngine.InputSystem.Mouse.current.leftButton.wasPressedThisFrame;
+            leftClickHeld = UnityEngine.InputSystem.Mouse.current.leftButton.isPressed;
+            leftClickUp = UnityEngine.InputSystem.Mouse.current.leftButton.wasReleasedThisFrame;
+            rightClickDown = UnityEngine.InputSystem.Mouse.current.rightButton.wasPressedThisFrame;
         }
         else
         {
             mousePos = Input.mousePosition;
-            leftClick = Input.GetMouseButtonDown(0);
+            leftClickDown = Input.GetMouseButtonDown(0);
+            leftClickHeld = Input.GetMouseButton(0);
+            leftClickUp = Input.GetMouseButtonUp(0);
+            rightClickDown = Input.GetMouseButtonDown(1);
         }
-        
+
+        // 如果正在拖拽已选中的物体，优先处理拖拽
+        if (draggingObject != null)
+        {
+            if (!leftClickHeld)
+            {
+                // 松开左键，结束拖拽
+                draggingObject = null;
+                return;
+            }
+
+            MoveDraggedObject(mousePos);
+            return;
+        }
+
         // 发射射线
         Ray ray = Camera.main.ScreenPointToRay(mousePos);
         RaycastHit hit;
         
         if (Physics.Raycast(ray, out hit))
         {
-            InteractableObject obj = hit.collider.GetComponent<InteractableObject>();
+            // 使用 GetComponentInParent，保证点击子物体 Collider 也能找到根节点上的 InteractableObject
+            InteractableObject obj = hit.collider.GetComponentInParent<InteractableObject>();
             if (obj != null)
             {
                 // 处理悬浮
@@ -268,10 +304,15 @@ public class ObjectInteractionManager : MonoBehaviour
                     OnObjectHoverEnter(newHover);
                 }
                 
-                // 处理点击
-                if (leftClick)
+                // 右键：打开留言对话框
+                if (rightClickDown)
                 {
                     OnObjectClicked(obj);
+                }
+                // 左键：开始拖拽移动
+                else if (leftClickDown)
+                {
+                    BeginDrag(obj, hit.point);
                 }
                 return;
             }
@@ -282,6 +323,27 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             OnObjectHoverExit(hoveredObject);
         }
+    }
+
+    private void BeginDrag(InteractableObject obj, Vector3 hitPoint)
+    {
+        draggingObject = obj;
+        dragGroundY = hitPoint.y;
+        dragOffset = obj.transform.position - hitPoint;
+    }
+
+    private void MoveDraggedObject(Vector2 mousePos)
+    {
+        if (draggingObject == null) return;
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        Ray ray = cam.ScreenPointToRay(mousePos);
+        var plane = new Plane(Vector3.up, new Vector3(0, dragGroundY, 0));
+        if (!plane.Raycast(ray, out var enter)) return;
+
+        var point = ray.GetPoint(enter);
+        draggingObject.transform.position = point + dragOffset;
     }
     
     // ========== 事件处理 ==========

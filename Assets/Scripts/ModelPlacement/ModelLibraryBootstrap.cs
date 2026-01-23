@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+#if MORPHIS_APPFLOW
+using Morphis.AppFlow;
+#endif
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem.UI;
 using UnityEngine.InputSystem;
@@ -28,6 +31,12 @@ namespace Morphis.ModelPlacement
         {
             if (!string.Equals(scene.name, TargetSceneName, System.StringComparison.OrdinalIgnoreCase))
                 return;
+
+#if MORPHIS_APPFLOW
+            // 仅当已经完成登录并选择了空间后，才显示模型库按钮
+            if (!AppSession.IsLoggedIn || string.IsNullOrEmpty(AppSession.WorkspaceId))
+                return;
+#endif
 
             if (Object.FindFirstObjectByType<ModelLibraryUI>() != null)
                 return;

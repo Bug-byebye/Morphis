@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 using GLTFast;
@@ -244,6 +245,9 @@ namespace AIPipeline.Nodes
             
             // "放置到场景" 按钮
             CreateButton(buttonArea.transform, "Place in Scene", new Color(0.3f, 0.7f, 0.3f), OnPlaceInScene);
+
+            // "加入背包 / 模型库" 按钮
+            CreateButton(buttonArea.transform, "Add to Bag", new Color(0.35f, 0.55f, 0.9f), OnAddToBag);
             
             // "关闭" 按钮
             CreateButton(buttonArea.transform, "Close", new Color(0.5f, 0.5f, 0.5f), OnClosePreview);
@@ -341,6 +345,49 @@ namespace AIPipeline.Nodes
         {
             if (cachedGlbData == null) return;
             StartCoroutine(InstantiateInScene());
+        }
+
+        /// <summary>
+        /// 将当前 GLB 保存到 Resources/Placeables 目录，供 ModelLibrary 使用（“背包”功能）。
+        /// 仅在 Editor 中生效：写入 Assets 并刷新 AssetDatabase。
+        /// </summary>
+        private void OnAddToBag()
+        {
+            if (cachedGlbData == null || cachedGlbData.Length == 0)
+            {
+                Debug.LogWarning("[Preview3D] No GLB data to add to bag.");
+                return;
+            }
+
+#if UNITY_EDITOR
+            try
+            {
+                const string relDir = "Assets/Resources/Placeables";
+                if (!Directory.Exists(relDir))
+                {
+                    Directory.CreateDirectory(relDir);
+                }
+
+                // 生成一个相对友好的文件名：Preview_yyyyMMdd_HHmmss.glb
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var fileName = $"Preview_{timestamp}.glb";
+                var fullPath = Path.Combine(relDir, fileName);
+
+                File.WriteAllBytes(fullPath, cachedGlbData);
+
+                Debug.Log($"[Preview3D] Saved GLB to bag: {fullPath}");
+
+                // 让 Unity 导入新资源（包括 glTFast ScriptedImporter 生成的 prefab），
+                // 这样 ModelLibrary 下次打开时就能在 Resources 中看到它。
+                UnityEditor.AssetDatabase.Refresh();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[Preview3D] Failed to save GLB to bag: {ex.Message}");
+            }
+#else
+            Debug.LogWarning("[Preview3D] Add to Bag currently only supported in the Unity Editor (writes to Assets/Resources/Placeables).");
+#endif
         }
         
         private IEnumerator InstantiateInScene()

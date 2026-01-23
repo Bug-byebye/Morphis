@@ -6,6 +6,9 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using GLTFast;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Morphis.ModelPlacement
 {
@@ -24,6 +27,7 @@ namespace Morphis.ModelPlacement
         private Canvas _canvas;
         private RectTransform _panel;
         private Button _toggleBtn;
+        private Button _closeBtn;
         private Transform _listRoot;
 
         private Camera _cam;
@@ -84,6 +88,16 @@ namespace Morphis.ModelPlacement
             titleRt.anchoredPosition = new Vector2(0, -8);
             title.alignment = TextAlignmentOptions.Center;
 
+            // Close button (X) on the top-right of panel
+            _closeBtn = CreateButton(panelGO.transform, "X", new Color(0.4f, 0.15f, 0.2f));
+            var closeRt = _closeBtn.GetComponent<RectTransform>();
+            closeRt.anchorMin = new Vector2(1, 1);
+            closeRt.anchorMax = new Vector2(1, 1);
+            closeRt.pivot = new Vector2(1, 1);
+            closeRt.sizeDelta = new Vector2(28, 28);
+            closeRt.anchoredPosition = new Vector2(-8, -8);
+            _closeBtn.onClick.AddListener(() => SetPanelVisible(false));
+
             // Scroll view root
             var scrollGO = new GameObject("Scroll");
             scrollGO.transform.SetParent(panelGO.transform, false);
@@ -140,8 +154,44 @@ namespace Morphis.ModelPlacement
 
         private void TogglePanel()
         {
-            var show = !_panel.gameObject.activeSelf;
-            _panel.gameObject.SetActive(show);
+            bool willBeVisible = !_panel.gameObject.activeSelf;
+            SetPanelVisible(willBeVisible);
+            
+            // 每次打开面板时刷新资源列表
+            if (willBeVisible)
+            {
+                RefreshPlaceables();
+            }
+        }
+
+        private void SetPanelVisible(bool visible)
+        {
+            _panel.gameObject.SetActive(visible);
+        }
+
+        /// <summary>
+        /// 刷新可放置资源列表（重新从 Resources 加载）
+        /// </summary>
+        private void RefreshPlaceables()
+        {
+#if UNITY_EDITOR
+            // 在 Editor 模式下刷新 AssetDatabase，确保新保存的文件被识别
+            AssetDatabase.Refresh();
+#endif
+            LoadPlaceables();
+            RebuildList();
+        }
+
+        private void Update()
+        {
+            // 按下 Esc 关闭面板（如果当前已打开）
+            if (_panel != null && _panel.gameObject.activeSelf)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape))
+                {
+                    SetPanelVisible(false);
+                }
+            }
         }
 
         private void LoadPlaceables()
@@ -283,8 +333,13 @@ namespace Morphis.ModelPlacement
         {
             if (go == null) return;
 
+            // 可拖拽移动
             if (go.GetComponent<PlaceableObjectMover>() == null)
                 go.AddComponent<PlaceableObjectMover>();
+
+            // 可交互留言/高亮
+            if (go.GetComponent<InteractableObject>() == null)
+                go.AddComponent<InteractableObject>();
         }
 
         private static void EnsureColliderFromRenderers(GameObject root)

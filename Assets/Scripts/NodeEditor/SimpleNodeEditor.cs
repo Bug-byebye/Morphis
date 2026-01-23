@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.IO;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -1303,7 +1304,7 @@ namespace AIPipeline.UI
         }
         
         /// <summary>
-        /// 给 Preview 节点添加 "Place in Scene" 按钮
+        /// 给 Preview 节点添加 "Place in Scene" / "Add to Bag" 按钮
         /// </summary>
         private void AddPlaceInSceneButton(NodeData previewNode)
         {
@@ -1313,44 +1314,116 @@ namespace AIPipeline.UI
             // 找到节点的 RectTransform
             RectTransform nodeRect = previewNode.gameObject.GetComponent<RectTransform>();
             if (nodeRect == null) return;
-            
-            // 创建按钮
-            GameObject btnObj = new GameObject("PlaceInSceneBtn");
-            btnObj.transform.SetParent(previewNode.gameObject.transform, false);
-            
-            RectTransform btnRect = btnObj.AddComponent<RectTransform>();
-            btnRect.anchorMin = new Vector2(0f, 0f);
-            btnRect.anchorMax = new Vector2(1f, 0f);
-            btnRect.pivot = new Vector2(0.5f, 0f);
-            btnRect.sizeDelta = new Vector2(-10, 25);
-            btnRect.anchoredPosition = new Vector2(0, 5);
-            
-            Image btnImage = btnObj.AddComponent<Image>();
-            btnImage.color = new Color(0.3f, 0.65f, 0.35f);
-            
-            Button btn = btnObj.AddComponent<Button>();
-            btn.targetGraphic = btnImage;
-            btn.onClick.AddListener(() => OnPlaceModelFromNode(previewNode));
-            previewNode.placeButton = btn;
-            
-            // 按钮文字
-            GameObject textObj = new GameObject("Text");
-            textObj.transform.SetParent(btnObj.transform, false);
-            var btnText = textObj.AddComponent<TextMeshProUGUI>();
-            btnText.text = "Place in Scene";
-            btnText.fontSize = 11;
-            btnText.alignment = TextAlignmentOptions.Center;
-            btnText.color = Color.white;
-            RectTransform textRect = textObj.GetComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.sizeDelta = Vector2.zero;
+
+            // 底部按钮容器
+            GameObject btnRoot = new GameObject("PreviewButtons");
+            btnRoot.transform.SetParent(previewNode.gameObject.transform, false);
+            RectTransform rootRect = btnRoot.AddComponent<RectTransform>();
+            rootRect.anchorMin = new Vector2(0f, 0f);
+            rootRect.anchorMax = new Vector2(1f, 0f);
+            rootRect.pivot = new Vector2(0.5f, 0f);
+            rootRect.sizeDelta = new Vector2(-8, 26);
+            rootRect.anchoredPosition = new Vector2(0, 4);
+
+            var hlg = btnRoot.AddComponent<HorizontalLayoutGroup>();
+            hlg.spacing = 4;
+            hlg.padding = new RectOffset(4, 4, 0, 2);
+            hlg.childAlignment = TextAnchor.MiddleCenter;
+            hlg.childControlWidth = true;
+            hlg.childForceExpandWidth = true;
+
+            // Place in Scene 按钮
+            GameObject placeObj = new GameObject("PlaceInSceneBtn");
+            placeObj.transform.SetParent(btnRoot.transform, false);
+            RectTransform placeRect = placeObj.AddComponent<RectTransform>();
+            Image placeImg = placeObj.AddComponent<Image>();
+            placeImg.color = new Color(0.3f, 0.65f, 0.35f);
+            Button placeBtn = placeObj.AddComponent<Button>();
+            placeBtn.targetGraphic = placeImg;
+            placeBtn.onClick.AddListener(() => OnPlaceModelFromNode(previewNode));
+            previewNode.placeButton = placeBtn;
+
+            var lePlace = placeObj.AddComponent<LayoutElement>();
+            lePlace.preferredHeight = 22;
+
+            GameObject placeTextObj = new GameObject("Text");
+            placeTextObj.transform.SetParent(placeObj.transform, false);
+            var placeText = placeTextObj.AddComponent<TextMeshProUGUI>();
+            placeText.text = "Place";
+            placeText.fontSize = 11;
+            placeText.alignment = TextAlignmentOptions.Center;
+            placeText.color = Color.white;
+            RectTransform placeTextRect = placeTextObj.GetComponent<RectTransform>();
+            placeTextRect.anchorMin = Vector2.zero;
+            placeTextRect.anchorMax = Vector2.one;
+            placeTextRect.sizeDelta = Vector2.zero;
+
+            // Add to Bag 按钮
+            GameObject bagObj = new GameObject("AddToBagBtn");
+            bagObj.transform.SetParent(btnRoot.transform, false);
+            RectTransform bagRect = bagObj.AddComponent<RectTransform>();
+            Image bagImg = bagObj.AddComponent<Image>();
+            bagImg.color = new Color(0.35f, 0.55f, 0.9f);
+            Button bagBtn = bagObj.AddComponent<Button>();
+            bagBtn.targetGraphic = bagImg;
+            bagBtn.onClick.AddListener(() => OnAddToBagFromNode(previewNode));
+
+            var leBag = bagObj.AddComponent<LayoutElement>();
+            leBag.preferredHeight = 22;
+
+            GameObject bagTextObj = new GameObject("Text");
+            bagTextObj.transform.SetParent(bagObj.transform, false);
+            var bagText = bagTextObj.AddComponent<TextMeshProUGUI>();
+            bagText.text = "Add to Bag";
+            bagText.fontSize = 11;
+            bagText.alignment = TextAlignmentOptions.Center;
+            bagText.color = Color.white;
+            RectTransform bagTextRect = bagTextObj.GetComponent<RectTransform>();
+            bagTextRect.anchorMin = Vector2.zero;
+            bagTextRect.anchorMax = Vector2.one;
+            bagTextRect.sizeDelta = Vector2.zero;
         }
         
         private void OnPlaceModelFromNode(NodeData previewNode)
         {
             if (previewNode.cachedModelData == null) return;
             StartCoroutine(PlaceModelFromNodeCoroutine(previewNode));
+        }
+
+        /// <summary>
+        /// 将 Preview 节点中的模型 GLB 写入 Assets/Resources/Placeables，供 ModelLibrary 使用。
+        /// </summary>
+        private void OnAddToBagFromNode(NodeData previewNode)
+        {
+            if (previewNode.cachedModelData == null || previewNode.cachedModelData.Length == 0)
+            {
+                UpdateStatus("No GLB data to add to bag.");
+                return;
+            }
+
+#if UNITY_EDITOR
+            try
+            {
+                const string relDir = "Assets/Resources/Placeables";
+                if (!Directory.Exists(relDir))
+                    Directory.CreateDirectory(relDir);
+
+                var timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var fileName = $"NodePreview_{timestamp}.glb";
+                var fullPath = Path.Combine(relDir, fileName);
+
+                File.WriteAllBytes(fullPath, previewNode.cachedModelData);
+                UnityEditor.AssetDatabase.Refresh();
+
+                UpdateStatus($"Saved to bag: {fileName}");
+            }
+            catch (System.Exception ex)
+            {
+                UpdateStatus($"Add to bag failed: {ex.Message}");
+            }
+#else
+            UpdateStatus("Add to Bag only works in Unity Editor (writes to Assets/Resources/Placeables).");
+#endif
         }
         
         private System.Collections.IEnumerator PlaceModelFromNodeCoroutine(NodeData previewNode)
