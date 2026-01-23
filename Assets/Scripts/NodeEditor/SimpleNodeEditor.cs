@@ -4,6 +4,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using TMPro;
 using System.Collections.Generic;
+using System.Collections;
 
 namespace AIPipeline.UI
 {
@@ -40,8 +41,11 @@ namespace AIPipeline.UI
 
         [Header("Main UI")]
         [SerializeField] private GameObject mainUICanvas;
-        [SerializeField] private Button openEditorButton;
-        [SerializeField] private TextMeshProUGUI openEditorButtonText;
+
+        // private Button openEditorButton; // Removed serialized field to prevent dupes
+        // private TextMeshProUGUI openEditorButtonText; // Removed serialized field
+        private Button workflowStationButton; 
+        private TextMeshProUGUI workflowStationButtonText;
         
         // 连接模式
         private bool isConnecting = false;
@@ -50,8 +54,14 @@ namespace AIPipeline.UI
         // Pipeline 错误标记
         private bool pipelineHasError = false;
         
-        void Start()
+        IEnumerator Start()
         {
+            // Wait for BootCanvas to disappear (login flow clear)
+            while (GameObject.Find("BootCanvas") != null)
+            {
+                yield return null;
+            }
+
             playerInput = FindObjectOfType<PlayerInput>();
             CreateEditorUI();
             CreateMainUI();
@@ -67,6 +77,15 @@ namespace AIPipeline.UI
 
         private void CreateMainUI()
         {
+            // Detect and cleanup legacy duplicate buttons
+            // Users reported "OpenButton" persisting, so we aggressively destroy it if found.
+            var legacyBtn = GameObject.Find("OpenButton");
+            if (legacyBtn != null) 
+            {
+                Debug.Log("[SimpleNodeEditor] Destroying legacy 'OpenButton' to prevent duplicates.");
+                Destroy(legacyBtn);
+            }
+
             // Hide if in Boot Flow
             if (GameObject.Find("BootCanvas") != null) return;
 
@@ -75,16 +94,22 @@ namespace AIPipeline.UI
             if (canvasObj != null)
             {
                 mainUICanvas = canvasObj;
-                Transform btnTrans = mainUICanvas.transform.Find("OpenButton");
+                Transform btnTrans = mainUICanvas.transform.Find("WorkflowStationButton"); // Updated name
                 if (btnTrans != null)
                 {
-                    openEditorButton = btnTrans.GetComponent<Button>();
-                    openEditorButtonText = btnTrans.GetComponentInChildren<TextMeshProUGUI>();
-                    if (openEditorButton != null)
+                    workflowStationButton = btnTrans.GetComponent<Button>();
+                    workflowStationButtonText = btnTrans.GetComponentInChildren<TextMeshProUGUI>();
+                    if (workflowStationButton != null)
                     {
-                        openEditorButton.onClick.RemoveAllListeners();
-                        openEditorButton.onClick.AddListener(ToggleEditor);
+                        workflowStationButton.onClick.RemoveAllListeners();
+                        workflowStationButton.onClick.AddListener(ToggleEditor);
                     }
+                }
+                else
+                {
+                     // If canvas exists but button doesn't (or has old name), destroy canvas to rebuild or just create button?
+                     // Safer to rebuild button.
+                     CreateWorkflowStationButton(canvasObj);
                 }
                 return;
             }
@@ -96,8 +121,13 @@ namespace AIPipeline.UI
             canvasObj.AddComponent<GraphicRaycaster>();
             mainUICanvas = canvasObj;
 
+            CreateWorkflowStationButton(canvasObj);
+        }
+
+        private void CreateWorkflowStationButton(GameObject canvasObj)
+        {
             // Create Button
-            GameObject btnObj = new GameObject("OpenButton");
+            GameObject btnObj = new GameObject("WorkflowStationButton"); // New Unique Name
             btnObj.transform.SetParent(canvasObj.transform, false);
             
             Image btnImage = btnObj.AddComponent<Image>();
@@ -105,7 +135,7 @@ namespace AIPipeline.UI
             
             Button btn = btnObj.AddComponent<Button>();
             btn.onClick.AddListener(ToggleEditor);
-            openEditorButton = btn;
+            workflowStationButton = btn;
 
             // Position Top-Right
             RectTransform rt = btnObj.GetComponent<RectTransform>();
@@ -124,7 +154,7 @@ namespace AIPipeline.UI
             txt.fontSize = 18;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = Color.white;
-            openEditorButtonText = txt;
+            workflowStationButtonText = txt;
             
             RectTransform txtRt = txtObj.GetComponent<RectTransform>();
             txtRt.anchorMin = Vector2.zero;
@@ -196,7 +226,7 @@ namespace AIPipeline.UI
                 Cursor.visible = true;
                 if (playerInput != null) playerInput.enabled = false;
                 
-                if (openEditorButtonText != null) openEditorButtonText.text = "Close Workflow";
+                if (workflowStationButtonText != null) workflowStationButtonText.text = "Close Workflow";
             }
             else
             {
@@ -205,7 +235,7 @@ namespace AIPipeline.UI
                 if (playerInput != null) playerInput.enabled = true;
                 if (contextMenu != null) contextMenu.SetActive(false);
                 
-                if (openEditorButtonText != null) openEditorButtonText.text = "Workflow Station";
+                if (workflowStationButtonText != null) workflowStationButtonText.text = "Workflow Station";
             }
             
             editorRoot.SetActive(isVisible);
@@ -346,10 +376,10 @@ namespace AIPipeline.UI
             
             statusText = statusObj.AddComponent<TextMeshProUGUI>();
             statusText.text = "Right-click to add nodes";
-            statusText.fontSize = 14;
+            statusText.fontSize = 18;
             statusText.enableAutoSizing = true;
-            statusText.fontSizeMin = 10;
-            statusText.fontSizeMax = 18;
+            statusText.fontSizeMin = 14;
+            statusText.fontSizeMax = 24;
             statusText.color = Color.white;
             statusText.alignment = TextAlignmentOptions.MidlineRight;
             
@@ -387,8 +417,8 @@ namespace AIPipeline.UI
             var tmp = textObj.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
             tmp.enableAutoSizing = true;
-            tmp.fontSizeMin = 10;
-            tmp.fontSizeMax = 16;
+            tmp.fontSizeMin = 14;
+            tmp.fontSizeMax = 20;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
@@ -400,7 +430,7 @@ namespace AIPipeline.UI
             contextMenu = new GameObject("ContextMenu");
             contextMenu.transform.SetParent(editorRoot.transform, false);
             RectTransform menuRect = contextMenu.AddComponent<RectTransform>();
-            menuRect.sizeDelta = new Vector2(180, 320); // 增加高度
+            menuRect.sizeDelta = new Vector2(240, 450); // 增加高度和宽度
             menuRect.pivot = new Vector2(0, 1);
             
             Image menuBg = contextMenu.AddComponent<Image>();
@@ -430,11 +460,11 @@ namespace AIPipeline.UI
         {
             GameObject label = new GameObject("Label");
             label.transform.SetParent(parent, false);
-            label.AddComponent<LayoutElement>().preferredHeight = 30;
+            label.AddComponent<LayoutElement>().preferredHeight = 40;
             
             var tmp = label.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
-            tmp.fontSize = 16;
+            tmp.fontSize = 20;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = new Color(1f, 0.6f, 0.75f);
             tmp.alignment = TextAlignmentOptions.Center;
@@ -444,7 +474,7 @@ namespace AIPipeline.UI
         {
             GameObject item = new GameObject(text);
             item.transform.SetParent(parent, false);
-            item.AddComponent<LayoutElement>().preferredHeight = 32;
+            item.AddComponent<LayoutElement>().preferredHeight = 40;
             
             Image itemBg = item.AddComponent<Image>();
             itemBg.color = new Color(0.25f, 0.25f, 0.3f, 1f);
@@ -463,7 +493,7 @@ namespace AIPipeline.UI
             
             var tmp = textObj.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
-            tmp.fontSize = 14;
+            tmp.fontSize = 18;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.raycastTarget = false;
@@ -498,7 +528,7 @@ namespace AIPipeline.UI
             node.transform.SetParent(nodeContainer, false);
             
             RectTransform rect = node.AddComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(220, 120); // 更大的节点
+            rect.sizeDelta = new Vector2(260, 160); // 更大的节点
             rect.pivot = new Vector2(0, 1);
             
             Image nodeBg = node.AddComponent<Image>();
@@ -513,7 +543,7 @@ namespace AIPipeline.UI
             titleRect.anchorMin = new Vector2(0, 1);
             titleRect.anchorMax = new Vector2(1, 1);
             titleRect.pivot = new Vector2(0.5f, 1);
-            titleRect.sizeDelta = new Vector2(0, 32); // 更高的标题栏
+            titleRect.sizeDelta = new Vector2(0, 45); // 更高的标题栏
             titleRect.anchoredPosition = Vector2.zero;
             
             Image titleBg = titleObj.AddComponent<Image>();
@@ -524,7 +554,7 @@ namespace AIPipeline.UI
             titleText.transform.SetParent(titleObj.transform, false);
             StretchToFill(titleText.GetComponent<RectTransform>());
             titleText.text = nodeType;
-            titleText.fontSize = 15; // 更大的字体
+            titleText.fontSize = 24; // 更大的字体
             titleText.fontStyle = FontStyles.Bold;
             titleText.color = Color.white;
             titleText.alignment = TextAlignmentOptions.Center;
@@ -584,7 +614,7 @@ namespace AIPipeline.UI
         {
             // 扩大节点尺寸以容纳预览图
             RectTransform nodeRect = parent.GetComponent<RectTransform>();
-            nodeRect.sizeDelta = new Vector2(280, 280); // 更大的 Preview 节点
+            nodeRect.sizeDelta = new Vector2(320, 320); // 更大的 Preview 节点
             
             GameObject previewArea = new GameObject("PreviewArea");
             previewArea.transform.SetParent(parent.transform, false);
@@ -618,7 +648,7 @@ namespace AIPipeline.UI
             
             var placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
             placeholderText.text = "Preview\n(waiting for image)";
-            placeholderText.fontSize = 14; // 更大的字体
+            placeholderText.fontSize = 18; // 更大的字体
             placeholderText.color = new Color(0.5f, 0.5f, 0.5f);
             placeholderText.alignment = TextAlignmentOptions.Center;
             placeholderText.raycastTarget = false;
@@ -648,7 +678,7 @@ namespace AIPipeline.UI
             var text = new GameObject("Text").AddComponent<TextMeshProUGUI>();
             text.transform.SetParent(textArea.transform, false);
             StretchToFill(text.GetComponent<RectTransform>());
-            text.fontSize = 11;
+            text.fontSize = 20;
             text.color = Color.white;
             
             input.textComponent = text;
@@ -658,7 +688,7 @@ namespace AIPipeline.UI
             ph.transform.SetParent(textArea.transform, false);
             StretchToFill(ph.GetComponent<RectTransform>());
             ph.text = "Enter prompt...";
-            ph.fontSize = 11;
+            ph.fontSize = 20;
             ph.fontStyle = FontStyles.Italic;
             ph.color = new Color(0.5f, 0.5f, 0.5f);
             
@@ -1164,7 +1194,14 @@ namespace AIPipeline.UI
                 yield break;
             }
             
-            // 创建预览环境（远离主场景）
+            // 如果已有模型，先销毁（防止叠加）
+            if (previewNode.previewModel != null)
+            {
+                Destroy(previewNode.previewModel);
+                previewNode.previewModel = null;
+            }
+
+            // 创建容器（远离主场景）
             Vector3 previewOrigin = new Vector3(1000, 1000, 1000);
             GameObject modelContainer = new GameObject("PreviewModel_" + previewNode.gameObject.GetInstanceID());
             modelContainer.transform.position = previewOrigin;
@@ -1195,6 +1232,13 @@ namespace AIPipeline.UI
             // 再居中：将本地中心偏移到预览原点
             modelContainer.transform.position = previewOrigin - localBoundsCenter * scale;
             
+            // 销毁旧相机
+            if (previewNode.previewCamera != null)
+            {
+                Destroy(previewNode.previewCamera.gameObject);
+                previewNode.previewCamera = null;
+            }
+
             // 创建预览相机
             GameObject camObj = new GameObject("PreviewCamera_" + previewNode.gameObject.GetInstanceID());
             camObj.transform.position = previewOrigin + new Vector3(0, 0.3f, -5f);
@@ -1393,7 +1437,11 @@ namespace AIPipeline.UI
         private void OnClearClicked()
         {
             foreach (var node in nodeList)
+            {
+                if (node.previewModel != null) Destroy(node.previewModel);
+                if (node.previewCamera != null) Destroy(node.previewCamera.gameObject);
                 if (node.gameObject != null) Destroy(node.gameObject);
+            }
             nodeList.Clear();
             
             foreach (var conn in connections)

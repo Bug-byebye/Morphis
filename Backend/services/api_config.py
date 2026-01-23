@@ -44,30 +44,32 @@ class ArkImageGenConfig:
     OPTIMIZE_PROMPT_OPTIONS = {}
 
 
-class TencentHunyuan3DConfig:
-    """腾讯混元生3D API 配置"""
-    BASE_URL = "https://api.ai3d.cloud.tencent.com"
-    SUBMIT_URL = f"{BASE_URL}/v1/ai3d/submit"
-    QUERY_URL = f"{BASE_URL}/v1/ai3d/query"
+class DoubaoSeed3DConfig:
+    """豆包 Seed3D (火山引擎) API 配置"""
+    BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
     
-    # API Key
-    API_KEY = os.getenv("TENCENT_3D_API_KEY", "")
+    # 模型 ID
+    MODEL_ID = os.getenv("ARK_3D_MODEL_ID", "doubao-seed3d-1-0-250928")
     
     # 轮询配置
-    POLL_INTERVAL = 5  # 秒
-    MAX_POLL_TIME = 300  # 最大等待时间（秒）
+    POLL_INTERVAL = 5  # 秒 - Seed3D 生成较慢，但用短轮询保持连接活跃
+    MAX_POLL_TIME = 600  # 最大等待时间（秒）
+    
+    # 默认参数
+    SUBDIVISION_LEVEL = os.getenv("SEED3D_SUBDIVISION_LEVEL", "medium")  # low, medium, high
+    FILE_FORMAT = os.getenv("SEED3D_FILE_FORMAT", "glb")  # glb, obj, fbx
     
     # Mock 模式 - 使用本地缓存模型，不调用真实 API
-    MOCK_MODE = os.getenv("HUNYUAN3D_MOCK_MODE", "false").lower() == "true"
+    MOCK_MODE = os.getenv("SEED3D_MOCK_MODE", "true").lower() == "true"
     
     # 缓存模型 - 生成成功后自动保存到本地
-    CACHE_MODELS = os.getenv("HUNYUAN3D_CACHE_MODELS", "true").lower() == "true"
+    CACHE_MODELS = os.getenv("SEED3D_CACHE_MODELS", "true").lower() == "true"
     
     # 缓存目录
-    CACHE_DIR = Path(os.getenv("HUNYUAN3D_CACHE_DIR", "./output/models"))
+    CACHE_DIR = Path(os.getenv("SEED3D_CACHE_DIR", "./output/models"))
     
     # Mock 模式下使用的默认模型
-    DEFAULT_MOCK_MODEL = Path(os.getenv("HUNYUAN3D_MOCK_MODEL", "./test_cube.glb"))
+    DEFAULT_MOCK_MODEL = Path(os.getenv("SEED3D_MOCK_MODEL", "./test_cube.glb"))
     
     @classmethod
     def ensure_cache_dir(cls):

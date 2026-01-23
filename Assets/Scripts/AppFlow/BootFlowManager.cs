@@ -282,12 +282,12 @@ namespace Morphis.AppFlow
             var panel = CreatePanel(parent, "WorkspacePanel");
             panel.SetActive(false);
 
-            var header = CreateText(panel.transform, "Select Workspace", 18, FontStyles.Bold);
+            var header = CreateText(panel.transform, "Select Workspace", 32, FontStyles.Bold);
             var headerRect = header.GetComponent<RectTransform>();
             headerRect.anchorMin = new Vector2(0, 1);
             headerRect.anchorMax = new Vector2(1, 1);
             headerRect.pivot = new Vector2(0.5f, 1);
-            headerRect.sizeDelta = new Vector2(0, 50);
+            headerRect.sizeDelta = new Vector2(0, 60);
             headerRect.anchoredPosition = new Vector2(0, -20);
             header.alignment = TextAlignmentOptions.Center;
 
@@ -297,7 +297,7 @@ namespace Morphis.AppFlow
             listRect.anchorMin = new Vector2(0.5f, 0.5f);
             listRect.anchorMax = new Vector2(0.5f, 0.5f);
             listRect.pivot = new Vector2(0.5f, 0.5f);
-            listRect.sizeDelta = new Vector2(480, 260);
+            listRect.sizeDelta = new Vector2(480, 400);
             listRect.anchoredPosition = new Vector2(0, 40);
             
             // Removed inner background image to avoid "double frame" look
@@ -315,13 +315,15 @@ namespace Morphis.AppFlow
             _workspaceListRoot = listBox.transform;
 
             _enterBtn = CreateButton(panel.transform, "Enter", new Color(0.30f, 0.55f, 0.90f));
+            // Larger Enter button
             var enterRect = _enterBtn.GetComponent<RectTransform>();
             enterRect.anchorMin = new Vector2(0.5f, 0);
             enterRect.anchorMax = new Vector2(0.5f, 0);
             enterRect.pivot = new Vector2(0.5f, 0);
-            enterRect.sizeDelta = new Vector2(240, 46);
-            enterRect.anchoredPosition = new Vector2(0, 90);
+            enterRect.sizeDelta = new Vector2(240, 60);
+            enterRect.anchoredPosition = new Vector2(0, 70); 
             _enterBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(EnterMainScene()); });
+            _enterBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 32;
 
             return panel;
         }
@@ -584,12 +586,15 @@ namespace Morphis.AppFlow
         {
             var btn = CreateButton(_workspaceListRoot, name, new Color(0.25f, 0.25f, 0.32f));
             var rt = btn.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(0, 46);
+            rt.sizeDelta = new Vector2(0, 70);
+            
+            // Override font size
+            btn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
             
             // Add LayoutElement for VerticalLayoutGroup to work properly
             var layoutElement = btn.gameObject.AddComponent<LayoutElement>();
-            layoutElement.minHeight = 46;
-            layoutElement.preferredHeight = 46;
+            layoutElement.minHeight = 70;
+            layoutElement.preferredHeight = 70;
             layoutElement.flexibleWidth = 1;
             
             btn.onClick.AddListener(() =>

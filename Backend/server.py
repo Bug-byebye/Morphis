@@ -313,6 +313,8 @@ async def api_text23d(request: Text23DRequest):
         )
         return Response(content=model_data, media_type="model/gltf-binary")
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return Response(content=str(e), status_code=500)
 
 

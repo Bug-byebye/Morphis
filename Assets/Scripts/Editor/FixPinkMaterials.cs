@@ -6,7 +6,7 @@ public class FixPinkMaterials
     [MenuItem("Tools/Fix Pink Materials")]
     public static void Fix()
     {
-        string[] guids = AssetDatabase.FindAssets("t:Material", new[] { "Assets/StylizedNatureBundle" });
+        string[] guids = AssetDatabase.FindAssets("t:Material", new[] { "Assets/Lowpoly_Holiday_House" });
         
         // Find URP shaders
         Shader urpLit = Shader.Find("Universal Render Pipeline/Lit");
@@ -40,16 +40,21 @@ public class FixPinkMaterials
                 }
                 else
                 {
+                    // 1. Cache old values BEFORE switching shader
+                    Texture mainTex = null;
+                    if (mat.HasProperty("_MainTex")) mainTex = mat.GetTexture("_MainTex");
+                    else if (mat.HasProperty("_BaseMap")) mainTex = mat.GetTexture("_BaseMap");
+                    
+                    Color mainColor = Color.white;
+                    if (mat.HasProperty("_Color")) mainColor = mat.GetColor("_Color");
+                    else if (mat.HasProperty("_BaseColor")) mainColor = mat.GetColor("_BaseColor");
+
+                    // 2. Switch Shader
                     mat.shader = urpLit;
                     
-                    if (mat.HasProperty("_MainTex") && mat.HasProperty("_BaseMap"))
-                    {
-                        mat.SetTexture("_BaseMap", mat.GetTexture("_MainTex"));
-                    }
-                     if (mat.HasProperty("_Color") && mat.HasProperty("_BaseColor"))
-                    {
-                        mat.SetColor("_BaseColor", mat.GetColor("_Color"));
-                    }
+                    // 3. Restore values to URP properties
+                    if (mainTex != null) mat.SetTexture("_BaseMap", mainTex);
+                    mat.SetColor("_BaseColor", mainColor);
                 }
                 
                 EditorUtility.SetDirty(mat);
@@ -57,6 +62,6 @@ public class FixPinkMaterials
             }
         }
         AssetDatabase.SaveAssets();
-        Debug.Log($"Fixed {count} materials in StylizedNatureBundle");
+        Debug.Log($"Fixed {count} materials in Lowpoly_Holiday_House");
     }
 }
