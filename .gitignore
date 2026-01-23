@@ -38,3 +38,6 @@ venv/
 # Other
 *.log
 test_output.glb
+
+# Large unused asset packs
+Assets/StylizedNatureBundle/
