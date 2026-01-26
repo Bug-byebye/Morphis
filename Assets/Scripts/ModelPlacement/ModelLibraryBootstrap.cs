@@ -17,7 +17,7 @@ namespace Morphis.ModelPlacement
     /// </summary>
     public static class ModelLibraryBootstrap
     {
-        private const string TargetSceneName = "Playground";
+        private const string TargetSceneName = "MainScene";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Init()

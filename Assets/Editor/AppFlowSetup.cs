@@ -16,7 +16,7 @@ namespace Morphis.AppFlow.Editor
     /// </summary>
     public static class AppFlowSetup
     {
-        private const string BootScenePath = "Assets/Scenes/Boot.unity";
+        private const string BootScenePath = "Assets/Game/Scenes/BootScene.unity";
         private const string PlaygroundScenePath = "Assets/StarterAssets/ThirdPersonController/Scenes/Playground.unity";
 
         [MenuItem("Tools/Morphis/AppFlow/Setup Build Settings (Boot + Playground)")]

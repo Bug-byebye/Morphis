@@ -26,7 +26,7 @@ namespace Morphis.AppFlow
         [SerializeField] private string baseUrl = "http://localhost:8000";
 
         [Header("Scene")]
-        [SerializeField] private string mainSceneName = "Playground";
+        [SerializeField] private string mainSceneName = "MainScene";
         [SerializeField] private Material backgroundSkybox;
 
         private Camera _skyboxCamera;
@@ -56,9 +56,20 @@ namespace Morphis.AppFlow
         private string WorkspacesUrl => $"{AppSession.BaseUrl}/workspaces";
 
         private static BootFlowManager _instance;
+        private bool _initialized;
+        private bool _createdEventSystem;
+        private GameObject _createdEventSystemGO;
 
         private void Awake()
         {
+            // 如果已经完成登录 + 选空间（例如已经进入 MainScene），则不再重复执行引导流程
+            if (AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId))
+            {
+                Debug.Log("[BootFlow] Already logged in + workspace selected. Skipping Boot UI.");
+                Destroy(gameObject);
+                return;
+            }
+
             if (_instance != null && _instance != this)
             {
                 // 冲突解决策略：如果已存在的实例没有 Skybox，而我有，说明我是用户新配置的“更好的”实例。
@@ -84,42 +95,194 @@ namespace Morphis.AppFlow
             AppSession.BaseUrl = baseUrl;
             DontDestroyOnLoad(gameObject);
         }
-
+        
         private void Start()
         {
+            // 在 Start() 中初始化，确保场景已经完全加载
+            Debug.Log($"[BootFlow] Start() called, scene: {SceneManager.GetActiveScene().name}, isLoaded: {SceneManager.GetActiveScene().isLoaded}");
+            if (_initialized) return;
+
+            // 二次兜底：如果在 Awake 之后状态变为已登录+已选空间，则不再初始化 UI
+            if (AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId))
+            {
+                Debug.Log("[BootFlow] Start(): already logged in + workspace selected. Skipping Boot UI.");
+                Destroy(gameObject);
+                return;
+            }
+
+            _initialized = true;
+            StartCoroutine(InitializeBootUI());
+        }
+
+        private System.Collections.IEnumerator InitializeBootUI()
+        {
+            Debug.Log("[BootFlow] InitializeBootUI coroutine started");
+            
+            // 等待一帧，确保所有系统都已初始化
+            yield return null;
+            yield return new WaitForEndOfFrame();
+            yield return null; // 再等待一帧，确保渲染系统准备好
+            
+            Debug.Log("[BootFlow] Starting UI initialization...");
+            
+            // 先确保 EventSystem 存在
+            EnsureEventSystem();
+            yield return null;
+            
             BuildUI();
+            yield return null; // 等待 UI 构建完成
+            
             ShowLogin();
             
             // 初始状态：禁用玩家输入，把控制权给 Login UI，避免光标被抢占
             SetPlayerInputEnabled(false);
             
+            // 再等待一帧，确保 UI 完全构建完成
+            yield return null;
+            yield return new WaitForEndOfFrame();
+            
+            // 强制刷新 Canvas
+            if (_canvas != null)
+            {
+                Canvas.ForceUpdateCanvases();
+                _canvas.enabled = false;
+                yield return null;
+                _canvas.enabled = true;
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                Debug.Log($"[BootFlow] Canvas refreshed: enabled={_canvas.enabled}, renderMode={_canvas.renderMode}");
+            }
+            else
+            {
+                Debug.LogError("[BootFlow] Canvas is null after BuildUI!");
+            }
+            
+            // 确保 EventSystem 激活并正确配置
+            var es = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
+            if (es != null)
+            {
+                es.gameObject.SetActive(true);
+                yield return null;
+                
+                // 强制更新 EventSystem
+                es.UpdateModules();
+                Debug.Log($"[BootFlow] EventSystem ready: {es.name}, active={es.gameObject.activeInHierarchy}");
+                
+#if ENABLE_INPUT_SYSTEM
+                var inputModule = es.GetComponent<InputSystemUIInputModule>();
+                if (inputModule != null)
+                {
+                    Debug.Log($"[BootFlow] InputSystemUIInputModule: enabled={inputModule.enabled}, actionsAsset={inputModule.actionsAsset?.name}");
+                    
+                    // 确保 InputModule 启用
+                    inputModule.enabled = true;
+                    
+                    // 确保 actionsAsset 存在并启用
+                    if (inputModule.actionsAsset == null)
+                    {
+                        Debug.LogWarning("[BootFlow] InputSystemUIInputModule has no actionsAsset! Creating new one...");
+                        inputModule.actionsAsset = CreateMinimalUIActions();
+                    }
+                    
+                    if (inputModule.actionsAsset != null)
+                    {
+                        if (!inputModule.actionsAsset.enabled)
+                        {
+                            inputModule.actionsAsset.Enable();
+                        }
+                        Debug.Log($"[BootFlow] InputSystem actionsAsset enabled: {inputModule.actionsAsset.enabled}, name: {inputModule.actionsAsset.name}");
+                    }
+                    
+                    // 强制更新模块
+                    inputModule.UpdateModule();
+                }
+                else
+                {
+                    Debug.LogError("[BootFlow] InputSystemUIInputModule not found! Recreating EventSystem...");
+                    EnsureEventSystem();
+                    yield return null;
+                }
+#endif
+            }
+            else
+            {
+                Debug.LogError("[BootFlow] EventSystem not found after BuildUI! Recreating...");
+                EnsureEventSystem();
+                yield return null;
+            }
+            
+            // 最后再次确保输入框可以接收输入
+            yield return null;
+            if (_usernameInput != null)
+            {
+                _usernameInput.enabled = false;
+                yield return null;
+                _usernameInput.enabled = true;
+                Debug.Log($"[BootFlow] Username input field ready: enabled={_usernameInput.enabled}, interactable={_usernameInput.interactable}");
+            }
+            if (_passwordInput != null)
+            {
+                _passwordInput.enabled = false;
+                yield return null;
+                _passwordInput.enabled = true;
+                Debug.Log($"[BootFlow] Password input field ready: enabled={_passwordInput.enabled}, interactable={_passwordInput.interactable}");
+            }
+            
+            // 确保光标可见且解锁
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            Debug.Log("[BootFlow] Cursor unlocked and visible");
+            
             // 先用英文，避免 TMP 默认字体缺中文导致的警告刷屏；后续我们再接入中文字体资源。
             SetStatus("Enter username/password (default: 111111 / 111111)");
+            
+            Debug.Log("[BootFlow] UI initialization complete! Canvas and EventSystem should be ready.");
         }
 
         private void BuildUI()
         {
+            // 先确保 EventSystem 存在并正确配置
             EnsureEventSystem();
 
             // Canvas
+            Debug.Log("[BootFlow] Creating Canvas...");
             var canvasGO = new GameObject("BootCanvas");
+            canvasGO.SetActive(true); // 先激活 GameObject
+            
             _canvas = canvasGO.AddComponent<Canvas>();
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             _canvas.sortingOrder = 1000;
+            
             var scaler = canvasGO.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
             scaler.matchWidthOrHeight = 0.5f;
-            canvasGO.AddComponent<GraphicRaycaster>();
+            
+            var raycaster = canvasGO.AddComponent<GraphicRaycaster>();
+            
+            // 确保所有组件都激活
+            _canvas.enabled = true;
+            raycaster.enabled = true;
+            
+            // 强制设置 Canvas 为激活状态
+            canvasGO.SetActive(true);
+            
+            Debug.Log($"[BootFlow] Canvas created: renderMode={_canvas.renderMode}, enabled={_canvas.enabled}, active={canvasGO.activeSelf}");
 
             DontDestroyOnLoad(canvasGO);
 
             // Background
+            Debug.Log("[BootFlow] Creating background...");
             var bg = new GameObject("Background");
             bg.transform.SetParent(_canvas.transform, false);
+            bg.transform.SetAsFirstSibling(); // 确保背景在最底层
             var bgRect = bg.AddComponent<RectTransform>();
             Stretch(bgRect);
             var bgImg = bg.AddComponent<Image>();
+            
+            // 确保 Image 组件正确初始化
+            bgImg.raycastTarget = false; // 背景不需要接收射线检测
+            bgImg.maskable = false;
             
             if (backgroundSkybox != null)
             {
@@ -134,6 +297,11 @@ namespace Morphis.AppFlow
                 // 设为完全不透明，确保启动时看不到后面的场景
                 bgImg.color = new Color(0.06f, 0.06f, 0.08f, 1.0f);
             }
+            
+            // 确保背景激活并强制刷新
+            bg.SetActive(true);
+            bgRect.ForceUpdateRectTransforms();
+            Debug.Log($"[BootFlow] Background created: color={bgImg.color}, active={bg.activeSelf}");
 
             // Root container
             var root = new GameObject("Root");
@@ -187,12 +355,18 @@ namespace Morphis.AppFlow
             
             _skyboxCamera = camGO.AddComponent<Camera>();
             _skyboxCamera.clearFlags = CameraClearFlags.Skybox;
-            _skyboxCamera.depth = 0; 
+            _skyboxCamera.depth = -2; // 确保在 UI Canvas 和 BootScene 摄像机下方
+            _skyboxCamera.cullingMask = 0; // 不渲染任何 Layer，只显示 Skybox
             
             var skybox = camGO.AddComponent<Skybox>();
-            skybox.material = backgroundSkybox;
+            if (backgroundSkybox != null)
+            {
+                skybox.material = backgroundSkybox;
+            }
             
-            _skyboxCamera.cullingMask = 0; 
+            // 确保摄像机激活
+            camGO.SetActive(true);
+            _skyboxCamera.enabled = true;
             
             camGO.AddComponent<SkyboxRotator>(); 
         }
@@ -477,7 +651,38 @@ namespace Morphis.AppFlow
 
             AppSession.SetWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
 
-            var sceneToLoad = GetSceneNameForWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
+            // 立即隐藏/销毁 BootScene 的 UI，确保不会在加载过程中显示
+            if (_canvas != null)
+            {
+                _canvas.gameObject.SetActive(false);
+                Debug.Log("[BootFlow] BootCanvas hidden before scene load");
+            }
+            if (_skyboxCamera != null)
+            {
+                _skyboxCamera.gameObject.SetActive(false);
+                Debug.Log("[BootFlow] BootSkyboxCamera hidden before scene load");
+            }
+            if (_createdEventSystem && _createdEventSystemGO != null)
+            {
+                _createdEventSystemGO.SetActive(false);
+                Debug.Log("[BootFlow] Boot-created EventSystem hidden before scene load");
+            }
+            
+            // 禁用 BootScene 的摄像机（如果存在）
+            var bootSceneCamera = Camera.main;
+            if (bootSceneCamera != null && bootSceneCamera.name == "BootUICamera")
+            {
+                bootSceneCamera.gameObject.SetActive(false);
+                Debug.Log("[BootFlow] BootScene camera disabled");
+            }
+            
+            // 等待一帧，确保 UI 完全隐藏
+            yield return null;
+
+            // 无论选择哪个 workspace，统一进入 MainScene
+            var sceneToLoad = "MainScene";
+            Debug.Log($"[BootFlow] Loading scene: {sceneToLoad}");
+            
             var op = SceneManager.LoadSceneAsync(sceneToLoad, LoadSceneMode.Single);
             
             if (op == null)
@@ -487,32 +692,61 @@ namespace Morphis.AppFlow
                 yield break;
             }
             
+            // 设置加载优先级，确保快速加载
+            op.priority = 1;
+            
+            // 等待场景完全加载
             while (!op.isDone)
             {
                 yield return null;
             }
+            
+            // 等待场景激活完成
+            yield return null;
+            yield return new WaitForEndOfFrame();
 
-            // 进入主场景后隐藏 UI（也可以销毁）
-            if (_canvas != null) _canvas.gameObject.SetActive(false);
-            if (_skyboxCamera != null) _skyboxCamera.gameObject.SetActive(false);
+            // 确保 UI 完全销毁（不再需要，因为已经进入主场景）
+            if (_canvas != null)
+            {
+                UnityEngine.Object.Destroy(_canvas.gameObject);
+                _canvas = null;
+                Debug.Log("[BootFlow] BootCanvas destroyed");
+            }
+            if (_skyboxCamera != null)
+            {
+                UnityEngine.Object.Destroy(_skyboxCamera.gameObject);
+                _skyboxCamera = null;
+                Debug.Log("[BootFlow] BootSkyboxCamera destroyed");
+            }
+            if (_createdEventSystem && _createdEventSystemGO != null)
+            {
+                UnityEngine.Object.Destroy(_createdEventSystemGO);
+                _createdEventSystemGO = null;
+                Debug.Log("[BootFlow] Boot-created EventSystem destroyed");
+            }
 
             // 主场景默认是第三人称：把鼠标锁回去（玩家可用右键/Tab 等切换 UI 时再解锁）
             SetCursorForUI(false);
             SetPlayerInputEnabled(true);
+            
+            Debug.Log("[BootFlow] MainScene loaded, Boot UI cleaned up");
             _busy = false;
+
+            // 引导流程完成后销毁自身，避免进入 MainScene 后再重复执行登录/选空间逻辑
+            Destroy(gameObject);
         }
 
         private void SetPlayerInputEnabled(bool enabled)
         {
 #if ENABLE_INPUT_SYSTEM
-            var playerInputs = FindObjectsOfType<UnityEngine.InputSystem.PlayerInput>();
+            var playerInputs = UnityEngine.Object.FindObjectsByType<UnityEngine.InputSystem.PlayerInput>(FindObjectsSortMode.None);
             foreach (var pi in playerInputs)
             {
                 pi.enabled = enabled;
             }
 #endif
             // 尝试禁用 StarterAssetsInputs（它是 MonoBehaviour，负责光标锁定逻辑）
-            var starterInputs = FindObjectsOfType<MonoBehaviour>().Where(m => m.GetType().Name == "StarterAssetsInputs").ToArray();
+            var starterInputs = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None).Where(m => m.GetType().Name == "StarterAssetsInputs").ToArray();
             foreach (var si in starterInputs)
             {
                 si.enabled = enabled;
@@ -625,28 +859,82 @@ namespace Morphis.AppFlow
             var es = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
             if (es == null)
             {
+                Debug.Log("[BootFlow] Creating EventSystem...");
                 var go = new GameObject("EventSystem");
                 es = go.AddComponent<EventSystem>();
                 UnityEngine.Object.DontDestroyOnLoad(go);
+
+                // 标记为“由 BootFlow 创建”，便于进入 MainScene 后清理，避免与主场景 EventSystem 冲突
+                var mgr = UnityEngine.Object.FindFirstObjectByType<BootFlowManager>();
+                if (mgr != null)
+                {
+                    mgr._createdEventSystem = true;
+                    mgr._createdEventSystemGO = go;
+                }
+            }
+
+            // 确保 EventSystem 激活
+            if (!es.gameObject.activeInHierarchy)
+            {
+                es.gameObject.SetActive(true);
             }
 
             // check input module
 #if ENABLE_INPUT_SYSTEM
-            if (es.GetComponent<InputSystemUIInputModule>() == null)
+            var existingModule = es.GetComponent<InputSystemUIInputModule>();
+            if (existingModule == null)
             {
                 // Remove old module if exists
                 var old = es.GetComponent<StandaloneInputModule>();
-                if (old != null) DestroyImmediate(old);
+                if (old != null) 
+                {
+                    Debug.Log("[BootFlow] Removing old StandaloneInputModule...");
+                    UnityEngine.Object.DestroyImmediate(old);
+                }
 
+                Debug.Log("[BootFlow] Adding InputSystemUIInputModule...");
                 var uiModule = es.gameObject.AddComponent<InputSystemUIInputModule>();
-                uiModule.actionsAsset = CreateMinimalUIActions();
+                var actionsAsset = CreateMinimalUIActions();
+                uiModule.actionsAsset = actionsAsset;
+                
+                // 确保 InputSystem 已启用
+                if (actionsAsset != null)
+                {
+                    if (!actionsAsset.enabled)
+                    {
+                        actionsAsset.Enable();
+                    }
+                    Debug.Log($"[BootFlow] InputSystem actionsAsset enabled: {actionsAsset.enabled}");
+                }
+            }
+            else
+            {
+                // 确保现有的 InputSystemUIInputModule 正常工作
+                Debug.Log("[BootFlow] InputSystemUIInputModule already exists, ensuring it's enabled...");
+                if (existingModule.actionsAsset != null)
+                {
+                    if (!existingModule.actionsAsset.enabled)
+                    {
+                        existingModule.actionsAsset.Enable();
+                    }
+                    Debug.Log($"[BootFlow] Existing actionsAsset enabled: {existingModule.actionsAsset.enabled}");
+                }
+                else
+                {
+                    Debug.LogWarning("[BootFlow] InputSystemUIInputModule exists but has no actionsAsset! Creating new one...");
+                    existingModule.actionsAsset = CreateMinimalUIActions();
+                    existingModule.actionsAsset.Enable();
+                }
             }
 #else
             if (es.GetComponent<StandaloneInputModule>() == null)
             {
-                 es.gameObject.AddComponent<StandaloneInputModule>();
+                Debug.Log("[BootFlow] Adding StandaloneInputModule...");
+                es.gameObject.AddComponent<StandaloneInputModule>();
             }
 #endif
+            
+            Debug.Log($"[BootFlow] EventSystem ready: {es.name}, active: {es.gameObject.activeInHierarchy}");
         }
 
 #if ENABLE_INPUT_SYSTEM
@@ -661,19 +949,26 @@ namespace Morphis.AppFlow
 
             var map = new InputActionMap("UI");
 
+            // 鼠标/指针输入
+            // 注意：InputSystemUIInputModule 期望的 action 名称是 "Click"，不是 "LeftClick"！
             var point = map.AddAction("Point", InputActionType.PassThrough, "<Pointer>/position");
-            var leftClick = map.AddAction("LeftClick", InputActionType.PassThrough, "<Pointer>/press");
+            var click = map.AddAction("Click", InputActionType.PassThrough, "<Pointer>/press"); // 必须是 "Click"！
             var rightClick = map.AddAction("RightClick", InputActionType.PassThrough, "<Mouse>/rightButton");
             var middleClick = map.AddAction("MiddleClick", InputActionType.PassThrough, "<Mouse>/middleButton");
             var scroll = map.AddAction("ScrollWheel", InputActionType.PassThrough, "<Mouse>/scroll");
 
-            // 键盘/手柄导航（可选，但给 submit/cancel 留好）
-            var move = map.AddAction("Navigate", InputActionType.PassThrough);
-            move.AddCompositeBinding("2DVector")
+            // 键盘输入 - 这是关键！TMP_InputField 需要这些来接收键盘输入
+            var navigate = map.AddAction("Navigate", InputActionType.PassThrough);
+            navigate.AddCompositeBinding("2DVector")
                 .With("Up", "<Keyboard>/w").With("Up", "<Keyboard>/upArrow")
                 .With("Down", "<Keyboard>/s").With("Down", "<Keyboard>/downArrow")
                 .With("Left", "<Keyboard>/a").With("Left", "<Keyboard>/leftArrow")
                 .With("Right", "<Keyboard>/d").With("Right", "<Keyboard>/rightArrow");
+
+            // 文本输入 - 关键！必须添加这个才能让输入框接收键盘输入
+            var textInput = map.AddAction("TextInput", InputActionType.PassThrough);
+            // 绑定所有键盘按键
+            textInput.AddBinding("<Keyboard>/anyKey");
 
             var submit = map.AddAction("Submit", InputActionType.Button, "<Keyboard>/enter");
             submit.AddBinding("<Keyboard>/numpadEnter");
@@ -683,10 +978,12 @@ namespace Morphis.AppFlow
             cancel.AddBinding("<Gamepad>/buttonEast");
 
             asset.AddActionMap(map);
+            
+            // 必须在返回前启用
             asset.Enable();
+            
+            Debug.Log("[BootFlow] Created InputActionAsset with keyboard support");
 
-            // 将 map/actions 绑定到 InputSystemUIInputModule 需要的标准字段名
-            //（字段名是序列化引用，运行时只要 actionsAsset 内有对应 action 名称即可）
             return asset;
         }
 #endif
@@ -737,6 +1034,8 @@ namespace Morphis.AppFlow
         {
             var go = new GameObject("InputField");
             go.transform.SetParent(parent, false);
+            go.SetActive(true); // 确保激活
+            
             var rt = go.AddComponent<RectTransform>();
             rt.anchorMin = new Vector2(0.5f, 1);
             rt.anchorMax = new Vector2(0.5f, 1);
@@ -745,8 +1044,11 @@ namespace Morphis.AppFlow
 
             var img = go.AddComponent<Image>();
             img.color = new Color(0.14f, 0.14f, 0.18f, 1f);
+            img.raycastTarget = true; // 确保可以接收射线
 
             var input = go.AddComponent<TMP_InputField>();
+            input.interactable = true; // 确保可交互
+            input.enabled = true;
 
             var textArea = new GameObject("TextArea");
             textArea.transform.SetParent(go.transform, false);
@@ -765,6 +1067,8 @@ namespace Morphis.AppFlow
             text.fontSize = 36; // Big!
             text.color = Color.white;
             text.alignment = TextAlignmentOptions.MidlineLeft;
+            text.raycastTarget = false; // 文本不需要接收射线
+            
             input.textComponent = text;
             input.textViewport = textAreaRT;
 
@@ -781,12 +1085,17 @@ namespace Morphis.AppFlow
                 phText.color = new Color(1f, 1f, 1f, 0.5f);
                 phText.fontStyle = FontStyles.Italic;
                 phText.alignment = TextAlignmentOptions.MidlineLeft;
+                phText.raycastTarget = false;
                 input.placeholder = phText;
             }
 
             input.textViewport = textAreaRT;
             input.textComponent = text;
             input.contentType = isPassword ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
+            input.characterLimit = 0; // 无限制
+            input.readOnly = false; // 确保可编辑
+
+            Debug.Log($"[BootFlow] Created InputField: interactable={input.interactable}, enabled={input.enabled}, readOnly={input.readOnly}");
 
             return input;
         }
@@ -886,11 +1195,8 @@ namespace Morphis.AppFlow
         /// </summary>
         private string GetSceneNameForWorkspace(string workspaceId, string workspaceName)
         {
-            // 示例：如果以后有不同空间类型，可以这样分支：
-            // if (workspaceId.StartsWith("ws-love")) return "Playground";
-            // if (workspaceId.StartsWith("ws-dev")) return "SampleScene";
-            // 目前统一进入配置的主场景。
-            return string.IsNullOrEmpty(mainSceneName) ? "Playground" : mainSceneName;
+            // 需求：不管用户选择什么 workspace，都进入 MainScene
+            return "MainScene";
         }
     }
 }

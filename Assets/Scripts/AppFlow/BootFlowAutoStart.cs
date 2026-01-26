@@ -16,12 +16,13 @@ namespace Morphis.AppFlow
     /// </summary>
     public static class BootFlowAutoStart
     {
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void CreateBootFlow()
         {
             // 避免重复创建
             if (Object.FindFirstObjectByType<BootFlowManager>() != null) return;
 
+            Debug.Log("[BootFlow] Creating BootFlowManager after scene load...");
             var go = new GameObject("BootFlowManager(Auto)");
             go.AddComponent<BootFlowManager>();
         }
