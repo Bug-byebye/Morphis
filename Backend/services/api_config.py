@@ -28,7 +28,7 @@ class ArkImageGenConfig:
     
     # 模型 ID - 从环境变量读取
     MODEL_T2I = os.getenv("ARK_IMAGE_MODEL_ID", "doubao-seedream-4-0-250828")
-    MODEL_I2I = os.getenv("ARK_IMAGE_EDIT_MODEL_ID", "doubao-seedream-4-0-250828")
+    MODEL_I2I = os.getenv("ARK_IMAGE_EDIT_MODEL_ID", "doubao-seedream-4-5-251128")
     
     # 默认参数
     DEFAULT_NUM_IMAGES = int(os.getenv("DEFAULT_NUM_IMAGES", "1"))
@@ -76,3 +76,9 @@ class DoubaoSeed3DConfig:
         """确保缓存目录存在"""
         cls.CACHE_DIR.mkdir(parents=True, exist_ok=True)
         return cls.CACHE_DIR
+
+
+class TrellisConfig:
+    """Trellis 3D Generation Server Configuration"""
+    BASE_URL = os.getenv("TRELLIS_SERVER_URL", "http://localhost:8001")
+    TIMEOUT = int(os.getenv("TRELLIS_TIMEOUT", "600"))
