@@ -15,7 +15,7 @@ EditorBuildSettings:
     path: Assets/SimpleLowPolyNature/Scenes/DemoDay.unity
     guid: 304a5748b784bc241be3c08d67013b21
   - enabled: 1
-    path: Assets/contemporary house/Scenes/demo.unity
+    path: Assets/Game/Scenes/demo.unity
     guid: 9fc0d4010bbf28b4594072e72b8655ab
   - enabled: 1
     path: Assets/Game/Scenes/MainScene.unity

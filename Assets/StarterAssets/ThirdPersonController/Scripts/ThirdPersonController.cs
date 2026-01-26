@@ -255,8 +255,21 @@ namespace StarterAssets
             // if there is a move input rotate player when the player is moving
             if (_input.move != Vector2.zero)
             {
+                // Verify camera reference, try to find if missing
+                if (_mainCamera == null)
+                {
+                    _mainCamera = GameObject.FindGameObjectWithTag("MainCamera");
+                }
+
+                // If still null, fallback to 0 (or character's current rotation, but 0 is safer for world space absolute input)
+                float cameraYaw = 0f;
+                if (_mainCamera != null)
+                {
+                    cameraYaw = _mainCamera.transform.eulerAngles.y;
+                }
+
                 _targetRotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg +
-                                  _mainCamera.transform.eulerAngles.y;
+                                  cameraYaw;
                 float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, _targetRotation, ref _rotationVelocity,
                     RotationSmoothTime);
 

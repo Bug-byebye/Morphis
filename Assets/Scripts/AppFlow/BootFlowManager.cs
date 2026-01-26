@@ -94,6 +94,12 @@ namespace Morphis.AppFlow
 
             AppSession.BaseUrl = baseUrl;
             DontDestroyOnLoad(gameObject);
+            
+            // Auto-add Global Scene Controller for ESC key handling
+            if (GetComponent<GlobalSceneController>() == null)
+            {
+                gameObject.AddComponent<GlobalSceneController>();
+            }
         }
         
         private void Start()
@@ -990,16 +996,9 @@ namespace Morphis.AppFlow
 
         private static void SetCursorForUI(bool uiMode)
         {
-            if (uiMode)
-            {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-            }
-            else
-            {
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
-            }
+            // Always unlock!
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
         }
 
         private static GameObject CreatePanel(Transform parent, string name)

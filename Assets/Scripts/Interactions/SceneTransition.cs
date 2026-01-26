@@ -27,6 +27,49 @@ namespace Interactions
             {
                 Debug.LogError($"[SceneTransition] Object '{gameObject.name}' is missing a Comparator (BoxCollider, MeshCollider, etc.)! Click interaction will NOT work.");
             }
+            
+            // Ensure Camera has PhysicsRaycaster to handle pointer clicks
+            var cam = Camera.main;
+            if (cam != null && cam.GetComponent<PhysicsRaycaster>() == null)
+            {
+                Debug.Log("[SceneTransition] Main Camera missing PhysicsRaycaster. Adding it automatically.");
+                cam.gameObject.AddComponent<PhysicsRaycaster>();
+            }
+            
+            // Auto-resize BoxCollider if it seems too small (default 1x1x1)
+            var boxCol = GetComponent<BoxCollider>();
+            if (boxCol != null && boxCol.size == Vector3.one && boxCol.center == Vector3.zero)
+            {
+                FitColliderToChildren(boxCol);
+            }
+        }
+        
+        private void FitColliderToChildren(BoxCollider boxVal)
+        {
+            Renderer[] renderers = GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) return;
+
+            Bounds bounds = renderers[0].bounds;
+            foreach (var r in renderers)
+            {
+                bounds.Encapsulate(r.bounds);
+            }
+
+            // Convert world bounds to local space
+            // NOTE: Encapsulating bounds works in world space, but collider needs local center/size
+            // This simple approximation assumes no rotation on parent during init, or handles it via inverse transform
+            boxVal.center = transform.InverseTransformPoint(bounds.center);
+            
+            // For size, we need to handle scale
+            Vector3 worldSize = bounds.size;
+            Vector3 localScale = transform.lossyScale;
+            boxVal.size = new Vector3(
+                worldSize.x / Mathf.Abs(localScale.x), 
+                worldSize.y / Mathf.Abs(localScale.y), 
+                worldSize.z / Mathf.Abs(localScale.z)
+            );
+            
+            Debug.Log($"[SceneTransition] Auto-resized BoxCollider for {name}");
         }
 
         // Standard Unity Mouse Event (works if using Legacy Input or "Both")

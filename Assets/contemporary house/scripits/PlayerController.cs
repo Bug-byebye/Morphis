@@ -39,15 +39,9 @@ namespace LittleDog
         }
         public void MouseControl()
         {
-            if (canMove == false)
-            {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                return;
-            }
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-
+            // ALWAYS keep cursor visible and unlocked
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
         }
     }
 }

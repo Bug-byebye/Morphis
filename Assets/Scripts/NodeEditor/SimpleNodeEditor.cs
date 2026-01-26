@@ -55,17 +55,36 @@ namespace AIPipeline.UI
         // Pipeline 错误标记
         private bool pipelineHasError = false;
         
+        // Singleton Implementation
+        public static SimpleNodeEditor Instance { get; private set; }
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
         IEnumerator Start()
         {
             // Wait for BootCanvas to disappear (login flow clear)
             while (GameObject.Find("BootCanvas") != null)
             {
                 yield return null;
+                if (this == null) yield break; // Safety check if object destroyed during wait
             }
 
+            if (this == null) yield break;
+
             playerInput = FindObjectOfType<PlayerInput>();
-            CreateEditorUI();
-            CreateMainUI();
+            
+            // Re-check canvases if we are persisting
+            if (mainCanvas == null) CreateEditorUI();
+            if (mainUICanvas == null) CreateMainUI();
             
             if (editorRoot != null)
                 editorRoot.SetActive(false);
@@ -79,50 +98,40 @@ namespace AIPipeline.UI
         private void CreateMainUI()
         {
             // Detect and cleanup legacy duplicate buttons
-            // Users reported "OpenButton" persisting, so we aggressively destroy it if found.
             var legacyBtn = GameObject.Find("OpenButton");
             if (legacyBtn != null) 
             {
-                Debug.Log("[SimpleNodeEditor] Destroying legacy 'OpenButton' to prevent duplicates.");
                 Destroy(legacyBtn);
             }
 
             // Hide if in Boot Flow
             if (GameObject.Find("BootCanvas") != null) return;
 
-            // Check if Main UI already exists
+            // If we already have a UI but it was destroyed (scene load), recreate it
+            // Or if we are persistent, we keep it.
+            
+            if (mainUICanvas != null) return; // Already exists
+
+            // Check if Main UI already exists in scene (duplicate check)
             GameObject canvasObj = GameObject.Find("NodeEditor_MainUI");
             if (canvasObj != null)
             {
                 mainUICanvas = canvasObj;
-                Transform btnTrans = mainUICanvas.transform.Find("WorkflowStationButton"); // Updated name
-                if (btnTrans != null)
-                {
-                    workflowStationButton = btnTrans.GetComponent<Button>();
-                    workflowStationButtonText = btnTrans.GetComponentInChildren<TextMeshProUGUI>();
-                    if (workflowStationButton != null)
-                    {
-                        workflowStationButton.onClick.RemoveAllListeners();
-                        workflowStationButton.onClick.AddListener(ToggleEditor);
-                    }
-                }
-                else
-                {
-                     // If canvas exists but button doesn't (or has old name), destroy canvas to rebuild or just create button?
-                     // Safer to rebuild button.
-                     CreateWorkflowStationButton(canvasObj);
-                }
-                return;
+                // Re-bind button...
             }
+            else
+            {
+                // Create Canvas
+                canvasObj = new GameObject("NodeEditor_MainUI");
+                canvasObj.AddComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+                canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                canvasObj.AddComponent<GraphicRaycaster>();
+                mainUICanvas = canvasObj;
+                
+                DontDestroyOnLoad(canvasObj); // Persistent UI
 
-            // Create Canvas
-            canvasObj = new GameObject("NodeEditor_MainUI");
-            canvasObj.AddComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            canvasObj.AddComponent<GraphicRaycaster>();
-            mainUICanvas = canvasObj;
-
-            CreateWorkflowStationButton(canvasObj);
+                CreateWorkflowStationButton(canvasObj);
+            }
         }
 
         private void CreateWorkflowStationButton(GameObject canvasObj)
@@ -165,51 +174,61 @@ namespace AIPipeline.UI
         
         void Update()
         {
-            if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
+            // Safety check: if UI is destroyed (e.g. scene change), stop updating references
+            if (this == null || editorRoot == null) return;
+
+            try
             {
-                ToggleEditor();
-            }
-            
-            // M 键切换鼠标显示（用于与场景物体交互）
-            if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame && !isVisible)
-            {
-                ToggleMouseCursor();
-            }
-            
-            if (!isVisible) return;
-            
-            // 右键菜单
-            if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
-            {
-                if (isConnecting)
+                if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
                 {
-                    // 取消连接
-                    isConnecting = false;
-                    connectingFromNode = null;
-                    UpdateStatus("Connection cancelled");
+                    ToggleEditor();
                 }
-                else
+                
+                // M 键切换鼠标显示（用于与场景物体交互）
+                if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame && !isVisible)
                 {
-                    ShowContextMenu(Mouse.current.position.ReadValue());
+                    ToggleMouseCursor();
                 }
-            }
-            
-            // 左键关闭菜单
-            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
-            {
-                if (contextMenu.activeSelf)
+                
+                if (!isVisible) return;
+                
+                // 右键菜单
+                if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                 {
-                    Vector2 mousePos = Mouse.current.position.ReadValue();
-                    RectTransform menuRect = contextMenu.GetComponent<RectTransform>();
-                    if (!RectTransformUtility.RectangleContainsScreenPoint(menuRect, mousePos, null))
+                    if (isConnecting)
                     {
-                        contextMenu.SetActive(false);
+                        // 取消连接
+                        isConnecting = false;
+                        connectingFromNode = null;
+                        UpdateStatus("Connection cancelled");
+                    }
+                    else
+                    {
+                        ShowContextMenu(Mouse.current.position.ReadValue());
                     }
                 }
+                
+                // 左键关闭菜单
+                if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    if (contextMenu != null && contextMenu.activeSelf)
+                    {
+                        Vector2 mousePos = Mouse.current.position.ReadValue();
+                        RectTransform menuRect = contextMenu.GetComponent<RectTransform>();
+                        if (!RectTransformUtility.RectangleContainsScreenPoint(menuRect, mousePos, null))
+                        {
+                            contextMenu.SetActive(false);
+                        }
+                    }
+                }
+                
+                // 更新连接线
+                UpdateConnectionLines();
             }
-            
-            // 更新连接线
-            UpdateConnectionLines();
+            catch (MissingReferenceException)
+            {
+                // Ignore errors during scene unload
+            }
         }
         
         public void ToggleEditor()
@@ -280,6 +299,7 @@ namespace AIPipeline.UI
             mainCanvas = canvasObj.AddComponent<Canvas>();
             mainCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             mainCanvas.sortingOrder = 100;
+            DontDestroyOnLoad(canvasObj); // Persistent Editor UI
             
             var scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;

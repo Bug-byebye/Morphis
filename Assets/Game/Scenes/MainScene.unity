@@ -2953,6 +2953,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 1205592427175424, guid: 912275f92af0eae43987638e709f2a77, type: 3}
       insertIndex: -1
       addedObject: {fileID: 570750087}
+    - targetCorrespondingSourceObject: {fileID: 1205592427175424, guid: 912275f92af0eae43987638e709f2a77, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 570750088}
   m_SourcePrefab: {fileID: 100100000, guid: 912275f92af0eae43987638e709f2a77, type: 3}
 --- !u!1001 &362592617
 PrefabInstance:
@@ -4869,6 +4872,20 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 9.947817, y: 13.540715, z: 8.845247}
   m_Center: {x: -0.18364479, y: 6.2703576, z: 0.34613565}
+--- !u!114 &570750088
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 570750083}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e686d6aac84114710bb6aff634a893c0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Interactions.SceneTransition
+  targetSceneName: demo
+  doubleClickThreshold: 0.3
 --- !u!1001 &585198860
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -9226,53 +9243,6 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 3490930834329334354, guid: 08bdb42a7413db34e867890b29e20ecd, type: 3}
   m_PrefabInstance: {fileID: 1145676685}
   m_PrefabAsset: {fileID: 0}
---- !u!1 &1179731821
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1179731823}
-  - component: {fileID: 1179731822}
-  m_Layer: 0
-  m_Name: BootFlowManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1179731822
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1179731821}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ff4f55ecb3581f940b30701709fad572, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Morphis.AppFlow.BootFlowManager
-  baseUrl: http://localhost:8000
-  mainSceneName: Playground
-  backgroundSkybox: {fileID: 2100000, guid: 169a1b8f06c17c84e8de491f2bfef986, type: 2}
---- !u!4 &1179731823
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1179731821}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -1.83133, y: -2.15513, z: -3.30692}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &1192694261
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -9447,7 +9417,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8944336655422409503, guid: f6d148d888ffbf54b9afe9936dfaec1f, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1.785
+      value: 1.6259999
       objectReference: {fileID: 0}
     - target: {fileID: 8944336655422409503, guid: f6d148d888ffbf54b9afe9936dfaec1f, type: 3}
       propertyPath: m_LocalPosition.z
@@ -10658,7 +10628,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2070925441746177912, guid: a1a802ecaf6775746bb2a929fb554ad8, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1.785
+      value: 1.6259999
       objectReference: {fileID: 0}
     - target: {fileID: 2070925441746177912, guid: a1a802ecaf6775746bb2a929fb554ad8, type: 3}
       propertyPath: m_LocalPosition.z
@@ -13364,7 +13334,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3893294197879345259, guid: 64dce48905ffd9b4293e595fa6941544, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.41
+      value: 0.251
       objectReference: {fileID: 0}
     - target: {fileID: 3893294197879345259, guid: 64dce48905ffd9b4293e595fa6941544, type: 3}
       propertyPath: m_LocalPosition.z
@@ -17093,7 +17063,6 @@ SceneRoots:
   - {fileID: 349155229}
   - {fileID: 1302250528}
   - {fileID: 2077595642}
-  - {fileID: 1179731823}
   - {fileID: 356295372}
   - {fileID: 218708136}
   - {fileID: 1970601059}
