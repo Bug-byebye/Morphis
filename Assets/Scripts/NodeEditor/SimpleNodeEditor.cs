@@ -968,6 +968,24 @@ namespace AIPipeline.UI
             rect.offsetMax = Vector2.zero;
         }
         
+        /// <summary>
+        /// 递归标记下游节点需要重新执行（当上游节点变化时）
+        /// </summary>
+        private void InvalidateDownstreamCache(NodeData node, HashSet<NodeData> needsReExecution)
+        {
+            if (node == null || node.connectedToNodes == null) return;
+            
+            foreach (var downstream in node.connectedToNodes)
+            {
+                if (downstream != null && !needsReExecution.Contains(downstream))
+                {
+                    needsReExecution.Add(downstream);
+                    downstream.cachedResult = null;  // Clear cached result
+                    InvalidateDownstreamCache(downstream, needsReExecution);  // Recurse
+                }
+            }
+        }
+        
         private void OnExecuteClicked()
         {
             StartCoroutine(ExecutePipelineGraph());
@@ -985,12 +1003,46 @@ namespace AIPipeline.UI
         /// </summary>
         private System.Collections.IEnumerator ExecutePipelineGraph()
         {
-            UpdateStatus("Executing pipeline...");
+            UpdateStatus("Executing pipeline (incremental)...");
             pipelineHasError = false; // Reset error flag
             
             // Map to store results of each node to pass to inputs of others
-            // Key: NodeData (source), Value: object (result data)
             Dictionary<NodeData, object> nodeResults = new Dictionary<NodeData, object>();
+            
+            // === INCREMENTAL EXECUTION: Pre-populate with cached results ===
+            // Also track which nodes need re-execution (no cache or upstream changed)
+            HashSet<NodeData> needsReExecution = new HashSet<NodeData>();
+            
+            // Step 1: Check TextInput nodes for changes and pre-populate cached results
+            foreach (var node in nodeList)
+            {
+                if (node.nodeType == "TextInput")
+                {
+                    string currentText = node.inputField != null ? node.inputField.text : "";
+                    // Check if text changed since last execution
+                    if (node.cachedInputPrompt != currentText)
+                    {
+                        // Text changed - mark for re-execution and invalidate downstream
+                        needsReExecution.Add(node);
+                        InvalidateDownstreamCache(node, needsReExecution);
+                    }
+                }
+                
+                // Pre-populate nodeResults with cached data (for nodes not needing re-execution)
+                if (node.cachedResult != null && !needsReExecution.Contains(node))
+                {
+                    nodeResults[node] = node.cachedResult;
+                }
+            }
+            
+            // Step 2: Find nodes that have no cached result (new nodes)
+            foreach (var node in nodeList)
+            {
+                if (node.cachedResult == null && node.nodeType != "TextInput")
+                {
+                    needsReExecution.Add(node);
+                }
+            }
             
             // List for Traversal (with Priority)
             List<NodeData> executionList = new List<NodeData>();
@@ -1005,11 +1057,12 @@ namespace AIPipeline.UI
                     if (!string.IsNullOrEmpty(p))
                     {
                         nodeResults[node] = p;
+                        node.cachedResult = p;           // Cache the result
+                        node.cachedInputPrompt = p;      // Remember for change detection
                         executionList.Add(node);
                         hasRoots = true;
                     }
                 }
-                // Add ImageInput here if supported in future
             }
 
             if (!hasRoots)
@@ -1106,102 +1159,127 @@ namespace AIPipeline.UI
                 UpdateStatus($"Processing: {currentNode.nodeType}...");
 
                 object outputData = null;
-
-                // Execute based on node type
-                switch (currentNode.nodeType)
+                
+                // === INCREMENTAL: Check if we can use cached result ===
+                bool useCache = !needsReExecution.Contains(currentNode) && currentNode.cachedResult != null;
+                
+                if (useCache)
                 {
-                    case "TextInput":
-                         // Already put in nodeResults. Just pass.
-                         outputData = nodeResults[currentNode];
-                         break;
+                    outputData = currentNode.cachedResult;
+                    UpdateStatus($"Using cached result for {currentNode.nodeType}");
+                }
+                else
+                {
+                    // Execute based on node type
+                    switch (currentNode.nodeType)
+                    {
+                        case "TextInput":
+                             // Already put in nodeResults. Just pass.
+                             outputData = nodeResults[currentNode];
+                             break;
 
-                    case "Text2Image":
-                        // Get input from connected
-                        if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
-                            inputData = nodeResults[currentNode.connectedFrom];
-                        
-                        if (inputData is string txtPrompt && !string.IsNullOrEmpty(txtPrompt))
-                            yield return CallText2Image(txtPrompt, (result) => outputData = result);
-                        else 
-                            { UpdateStatus("Text2Image needs text input!"); pipelineHasError = true; }
-                        break;
-                        
-                    case "Image2Image":
-                        // Multi-input gathering
-                        byte[] imgInput = null;
-                        string txtInput = ""; 
-                        
-                        if (currentNode.inputConnections.ContainsKey("Image"))
-                        {
-                            var src = currentNode.inputConnections["Image"];
-                            if (nodeResults.ContainsKey(src)) imgInput = nodeResults[src] as byte[];
-                        }
-                        
-                        if (currentNode.inputConnections.ContainsKey("Text"))
-                        {
-                             var src = currentNode.inputConnections["Text"];
-                             if (nodeResults.ContainsKey(src)) txtInput = nodeResults[src] as string;
-                        }
-
-                        if (imgInput != null)
-                        {
-                            yield return CallImage2Image(imgInput, txtInput, (result) => outputData = result);
-                        }
-                        else
-                        {
-                            UpdateStatus("Image2Image needs image input!");
-                            pipelineHasError = true;
-                        }
-                        break;
-                        
-                    case "Image23D":
-                         if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
-                            inputData = nodeResults[currentNode.connectedFrom];
-
-                        if (inputData is byte[] imgData2)
-                        {
-                            yield return CallImage23D(imgData2, (result) => outputData = result);
-                        }
-                        else
-                        {
-                            UpdateStatus("Image23D needs image input!"); // Debug hit here likely
-                            pipelineHasError = true;
-                        }
-                        break;
-                        
-                    case "Text23D":
-                         if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
-                            inputData = nodeResults[currentNode.connectedFrom];
+                        case "Text2Image":
+                            // Get input from connected
+                            if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
                             
-                        if (inputData is string txtPrompt2)
-                            yield return CallText23D(txtPrompt2, (result) => outputData = result);
-                        else
-                             { UpdateStatus("Text23D needs text input!"); pipelineHasError = true; }
-                        break;
-                        
-                    case "Preview":
-                        // No output for preview, just display
-                        if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
-                            inputData = nodeResults[currentNode.connectedFrom];
-
-                        if (inputData is byte[] imageOrModelData && imageOrModelData.Length > 100)
-                        {
-                            if (IsGLB(imageOrModelData))
+                            if (inputData is string txtPrompt && !string.IsNullOrEmpty(txtPrompt))
                             {
-                                yield return LoadModelInNode(imageOrModelData, currentNode);
+                                UpdateStatus($"Calling Text2Image API...");
+                                yield return CallText2Image(txtPrompt, (result) => outputData = result);
+                            }
+                            else 
+                                { UpdateStatus("Text2Image needs text input!"); pipelineHasError = true; }
+                            break;
+                            
+                        case "Image2Image":
+                            // Multi-input gathering
+                            byte[] imgInput = null;
+                            string txtInput = ""; 
+                            
+                            if (currentNode.inputConnections.ContainsKey("Image"))
+                            {
+                                var src = currentNode.inputConnections["Image"];
+                                if (nodeResults.ContainsKey(src)) imgInput = nodeResults[src] as byte[];
+                            }
+                            
+                            if (currentNode.inputConnections.ContainsKey("Text"))
+                            {
+                                 var src = currentNode.inputConnections["Text"];
+                                 if (nodeResults.ContainsKey(src)) txtInput = nodeResults[src] as string;
+                            }
+
+                            if (imgInput != null)
+                            {
+                                UpdateStatus($"Calling Image2Image API...");
+                                yield return CallImage2Image(imgInput, txtInput, (result) => outputData = result);
                             }
                             else
                             {
-                                DisplayImageInNode(imageOrModelData, currentNode);
+                                UpdateStatus("Image2Image needs image input!");
+                                pipelineHasError = true;
                             }
-                        }
-                        else
-                        {
-                            UpdateStatus("Preview node: No valid data to display");
-                        }
-                        // Preview passes data through? Or just null? Let's pass through for potential chain
-                        outputData = inputData; 
-                        break;
+                            break;
+                            
+                        case "Image23D":
+                             if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+
+                            if (inputData is byte[] imgData2)
+                            {
+                                UpdateStatus($"Calling Image23D API...");
+                                yield return CallImage23D(imgData2, (result) => outputData = result);
+                            }
+                            else
+                            {
+                                UpdateStatus("Image23D needs image input!");
+                                pipelineHasError = true;
+                            }
+                            break;
+                            
+                        case "Text23D":
+                             if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+                                
+                            if (inputData is string txtPrompt2)
+                            {
+                                UpdateStatus($"Calling Text23D API...");
+                                yield return CallText23D(txtPrompt2, (result) => outputData = result);
+                            }
+                            else
+                                 { UpdateStatus("Text23D needs text input!"); pipelineHasError = true; }
+                            break;
+                            
+                        case "Preview":
+                            // No output for preview, just display
+                            if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+
+                            if (inputData is byte[] imageOrModelData && imageOrModelData.Length > 100)
+                            {
+                                if (IsGLB(imageOrModelData))
+                                {
+                                    yield return LoadModelInNode(imageOrModelData, currentNode);
+                                }
+                                else
+                                {
+                                    DisplayImageInNode(imageOrModelData, currentNode);
+                                }
+                            }
+                            else
+                            {
+                                UpdateStatus("Preview node: No valid data to display");
+                            }
+                            // Preview passes data through
+                            outputData = inputData; 
+                            break;
+                    }
+                    
+                    // === Cache the result for future incremental runs ===
+                    if (outputData != null)
+                    {
+                        currentNode.cachedResult = outputData;
+                    }
                 }
 
                 if (pipelineHasError) yield break;
@@ -1295,11 +1373,11 @@ namespace AIPipeline.UI
                 {
                     previewNode.previewImage.texture = texture;
                     
-                    // 隐藏占位符文字
-                    var placeholder = previewNode.gameObject.GetComponentInChildren<TextMeshProUGUI>();
-                    if (placeholder != null && placeholder.gameObject.name == "Placeholder")
+                    // 隐藏占位符文字 - 使用准确的路径查找
+                    var placeholderTransform = previewNode.gameObject.transform.Find("PreviewArea/Placeholder");
+                    if (placeholderTransform != null)
                     {
-                        placeholder.gameObject.SetActive(false);
+                        placeholderTransform.gameObject.SetActive(false);
                     }
                     
                     UpdateStatus($"Image displayed in node: {texture.width}x{texture.height}");
@@ -1638,15 +1716,11 @@ namespace AIPipeline.UI
             {
                 previewNode.previewImage.texture = previewNode.previewRT;
                 
-                // 隐藏占位符 - 查找所有 TextMeshProUGUI 并隐藏名为 Placeholder 的
-                var allTexts = previewNode.gameObject.GetComponentsInChildren<TextMeshProUGUI>();
-                foreach (var txt in allTexts)
+                // 隐藏占位符 - 使用准确的路径查找
+                var placeholderTransform = previewNode.gameObject.transform.Find("PreviewArea/Placeholder");
+                if (placeholderTransform != null)
                 {
-                    if (txt.gameObject.name == "Placeholder")
-                    {
-                        txt.gameObject.SetActive(false);
-                        break;
-                    }
+                    placeholderTransform.gameObject.SetActive(false);
                 }
             }
             
@@ -1885,6 +1959,10 @@ namespace AIPipeline.UI
         {
             foreach (var node in nodeList)
             {
+                // Clear cached results
+                node.cachedResult = null;
+                node.cachedInputPrompt = null;
+                
                 if (node.previewModel != null) Destroy(node.previewModel);
                 if (node.previewCamera != null) Destroy(node.previewCamera.gameObject);
                 if (node.gameObject != null) Destroy(node.gameObject);
@@ -1895,7 +1973,7 @@ namespace AIPipeline.UI
                 if (conn != null) Destroy(conn.gameObject);
             connections.Clear();
             
-            UpdateStatus("Canvas cleared");
+            UpdateStatus("Canvas cleared (all cache invalidated)");
         }
         
         private void UpdateStatus(string msg)
@@ -1932,6 +2010,10 @@ namespace AIPipeline.UI
         public byte[] cachedModelData;    // 缓存的模型数据用于放置到场景
         public Button placeButton;        // "Place in Scene" 按钮
         public List<NodeData> connectedToNodes = new List<NodeData>(); // Output connections
+        
+        // === Incremental Execution: Cached Results ===
+        public object cachedResult;       // 缓存的执行结果 (string, byte[], etc.)
+        public string cachedInputPrompt;  // TextInput 节点：缓存的输入文本（用于检测变化）
         
         // Multi-input support: PortID -> Connected Source Node
         public Dictionary<string, NodeData> inputConnections = new Dictionary<string, NodeData>();
