@@ -124,8 +124,12 @@ namespace AIPipeline.UI
             else
             {
                 // Create Canvas
+                // Create Canvas
                 canvasObj = new GameObject("NodeEditor_MainUI");
-                canvasObj.AddComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+                var canvas = canvasObj.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvas.sortingOrder = 200; // Ensure it's above the Editor Window (order 100)
+                
                 canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
                 canvasObj.AddComponent<GraphicRaycaster>();
                 mainUICanvas = canvasObj;

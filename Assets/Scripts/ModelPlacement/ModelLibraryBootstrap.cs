@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+using LittleDog; // Fix CS0246: PlayerController namespace
 #if MORPHIS_APPFLOW
 using Morphis.AppFlow;
 #endif
@@ -29,7 +30,9 @@ namespace Morphis.ModelPlacement
 
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (!string.Equals(scene.name, TargetSceneName, System.StringComparison.OrdinalIgnoreCase))
+            // Allow both "MainScene" and "demo"
+            if (!string.Equals(scene.name, TargetSceneName, System.StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(scene.name, "demo", System.StringComparison.OrdinalIgnoreCase))
                 return;
 
 #if MORPHIS_APPFLOW
@@ -42,6 +45,7 @@ namespace Morphis.ModelPlacement
                 return;
 
             EnsureEventSystem();
+            EnsureSceneColliders();
 
             var go = new GameObject("ModelLibraryUI(Auto)");
             go.AddComponent<ModelLibraryUI>();
@@ -49,17 +53,28 @@ namespace Morphis.ModelPlacement
 
         private static void EnsureEventSystem()
         {
-            if (Object.FindFirstObjectByType<EventSystem>() != null) return;
+            var es = Object.FindFirstObjectByType<EventSystem>();
+            if (es == null)
+            {
+                var go = new GameObject("EventSystem");
+                es = go.AddComponent<EventSystem>();
+            }
 
-            var es = new GameObject("EventSystem");
-            es.AddComponent<EventSystem>();
-
+            // Ensure we have an Input Module
+            if (es.GetComponent<BaseInputModule>() == null)
+            {
+                // Since PlayerController uses legacy Input.GetAxis, we should prefer StandaloneInputModule.
+                // It works in "Old" and "Both" modes.
+                // Only if StandaloneInputModule is missing (extremely rare) or fails should we consider alternatives.
+                var standalone = es.gameObject.AddComponent<StandaloneInputModule>();
+                
+                // If the new Input System is exclusively enabled, StandaloneInputModule typically works but warns,
+                // or we might need InputSystemUIInputModule. However, given the project context, Standalone is safer.
 #if ENABLE_INPUT_SYSTEM
-            var ui = es.AddComponent<InputSystemUIInputModule>();
-            ui.actionsAsset = CreateMinimalUIActions();
-#else
-            es.AddComponent<StandaloneInputModule>();
+                // If we absolutely wanted to support New Input System ONLY mode, we'd check for that.
+                // But for now, let's stick to Standalone as the default for this project.
 #endif
+            }
         }
 
 #if ENABLE_INPUT_SYSTEM
@@ -82,6 +97,44 @@ namespace Morphis.ModelPlacement
             return asset;
         }
 #endif
+
+        private static void EnsureSceneColliders()
+        {
+            // Only auto-add colliders in the "demo" scene where environment is known to lack them.
+            // Be careful not to mess up MainScene or others that might be set up correctly.
+            // Only auto-add colliders in "demo" or "MainScene" if they lack them.
+            // Only auto-add colliders in the "demo" scene where environment is known to lack them.
+            var scene = SceneManager.GetActiveScene();
+            if (!string.Equals(scene.name, "demo", System.StringComparison.OrdinalIgnoreCase))
+                return;
+            
+            // Reverted main scene logic as per user request (scene already has colliders).
+
+            var renderers = Object.FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);
+            int count = 0;
+            foreach (var r in renderers)
+            {
+                // Skip if it already has any collider
+                if (r.GetComponent<Collider>() != null) continue;
+
+                // Skip if it's part of the Player (has CharacterController in parent)
+                if (r.GetComponentInParent<CharacterController>() != null) continue;
+                if (r.GetComponentInParent<PlayerController>() != null) continue;
+
+                // Skip if name contains "Player" (safety heuristic)
+                if (r.name.Contains("Player") || r.transform.root.name.Contains("Player")) continue;
+                
+                // Skip if it is UI or small decoration
+                // or if it's part of the player itself (though checking tag might be better)
+                
+                // Add MeshCollider
+                var mc = r.gameObject.AddComponent<MeshCollider>();
+                // In some cases, we might want convex if we need rigidbodies, 
+                // but for static environment, non-convex is fine and more accurate.
+                count++;
+            }
+            Debug.Log($"[ModelLibraryBootstrap] Auto-generated MeshColliders for {count} objects in 'demo' scene.");
+        }
     }
 }
 

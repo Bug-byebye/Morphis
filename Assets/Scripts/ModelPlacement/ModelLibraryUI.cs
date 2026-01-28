@@ -247,30 +247,16 @@ namespace Morphis.ModelPlacement
 
         internal bool TryPlace(PlaceableDefinition def, Vector2 screenPos)
         {
-            if (_cam == null) _cam = Camera.main;
-            if (_cam == null) return false;
-
-            Vector3 worldPos;
-            var ray = _cam.ScreenPointToRay(screenPos);
-
-            // Prefer collider hit
-            if (Physics.Raycast(ray, out var hit, 500f, ~0, QueryTriggerInteraction.Ignore))
-            {
-                worldPos = hit.point;
-            }
-            else
-            {
-                var plane = new Plane(Vector3.up, new Vector3(0, groundY, 0));
-                if (!plane.Raycast(ray, out var enter)) return false;
-                worldPos = ray.GetPoint(enter);
-            }
+            if (!GetPlacementInfo(screenPos, out var worldPos, out var targetBaseY))
+                return false;
 
             // 1) Prefab
             if (def.Prefab != null)
             {
                 var go = Instantiate(def.Prefab, worldPos, Quaternion.identity);
                 EnsureColliderFromRenderers(go);
-                NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
+                NormalizeScale(go, targetSize: 1.0f);
+                SnapToGround(go, targetBaseY);
                 EnsurePlaceableComponents(go);
                 Debug.Log($"[ModelLibrary] Placed prefab: {def.DisplayName} at {worldPos}");
                 return true;
@@ -280,7 +266,7 @@ namespace Morphis.ModelPlacement
             if (def.GlbAsset != null)
             {
                 Debug.Log($"[ModelLibrary] Loading GLB: {def.DisplayName} ({def.GlbAsset.bytes?.Length ?? 0} bytes) at {worldPos}");
-                StartCoroutine(LoadGlbAndPlace(def.GlbAsset, def.DisplayName, worldPos));
+                StartCoroutine(LoadGlbAndPlace(def.GlbAsset, def.DisplayName, worldPos, targetBaseY));
                 return true;
             }
 
@@ -289,14 +275,15 @@ namespace Morphis.ModelPlacement
                 var go = GameObject.CreatePrimitive(def.FallbackPrimitive);
                 go.name = def.DisplayName;
                 go.transform.position = worldPos;
-                NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
+                NormalizeScale(go, targetSize: 1.0f);
+                SnapToGround(go, targetBaseY);
                 EnsurePlaceableComponents(go);
                 Debug.Log($"[ModelLibrary] Placed primitive: {def.DisplayName} at {worldPos}");
                 return true;
             }
         }
 
-        private IEnumerator LoadGlbAndPlace(TextAsset glb, string displayName, Vector3 worldPos)
+        private IEnumerator LoadGlbAndPlace(TextAsset glb, string displayName, Vector3 worldPos, float targetBaseY)
         {
             if (glb == null) yield break;
 
@@ -323,10 +310,40 @@ namespace Morphis.ModelPlacement
             }
 
             EnsureColliderFromRenderers(root);
-            NormalizeScaleAndSnapToGround(root, groundY, targetSize: 1.0f);
+            NormalizeScale(root, targetSize: 1.0f);
+            SnapToGround(root, targetBaseY);
             EnsurePlaceableComponents(root);
 
             Debug.Log($"[ModelLibrary] Placed GLB: {displayName} at {worldPos}");
+        }
+
+        public bool GetPlacementInfo(Vector2 screenPos, out Vector3 worldPos, out float targetBaseY)
+        {
+            worldPos = Vector3.zero;
+            targetBaseY = groundY;
+
+            if (_cam == null) _cam = Camera.main;
+            if (_cam == null) return false;
+
+            var ray = _cam.ScreenPointToRay(screenPos);
+
+            // Prefer collider hit
+            if (Physics.Raycast(ray, out var hit, 500f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                worldPos = hit.point;
+                targetBaseY = hit.point.y; 
+                return true;
+            }
+            
+            // Fallback to plane
+            var plane = new Plane(Vector3.up, new Vector3(0, groundY, 0));
+            if (plane.Raycast(ray, out var enter))
+            {
+                worldPos = ray.GetPoint(enter);
+                return true;
+            }
+
+            return false;
         }
 
         private void EnsurePlaceableComponents(GameObject go)
@@ -371,31 +388,31 @@ namespace Morphis.ModelPlacement
             );
         }
 
-        private static void NormalizeScaleAndSnapToGround(GameObject root, float groundY, float targetSize)
+        public static void NormalizeScale(GameObject root, float targetSize)
         {
             if (root == null) return;
 
             var bounds = CalculateRendererBounds(root, out var hasBounds);
             if (!hasBounds) return;
 
-            // 缩放到一个“可见的”合理尺寸（戒指这类常常非常小）
             var size = bounds.size;
             var maxDim = Mathf.Max(size.x, Mathf.Max(size.y, size.z));
             if (maxDim > 0.0001f)
             {
                 var scaleFactor = targetSize / maxDim;
-                // 限制极端缩放
                 scaleFactor = Mathf.Clamp(scaleFactor, 0.01f, 1000f);
                 root.transform.localScale *= scaleFactor;
             }
+        }
 
-            // 重新计算 bounds，用于贴地
-            bounds = CalculateRendererBounds(root, out hasBounds);
-            if (!hasBounds) return;
+        public static void SnapToGround(GameObject root, float groundY)
+        {
+             if (root == null) return;
+             var bounds = CalculateRendererBounds(root, out var hasBounds);
+             if (!hasBounds) return;
 
-            // 贴到地面：让 bounds.min.y 落到 groundY
-            var deltaY = groundY - bounds.min.y;
-            root.transform.position += new Vector3(0, deltaY, 0);
+             var deltaY = groundY - bounds.min.y;
+             root.transform.position += new Vector3(0, deltaY, 0);
         }
 
         private static Bounds CalculateRendererBounds(GameObject root, out bool hasBounds)
@@ -487,6 +504,9 @@ namespace Morphis.ModelPlacement
 
             private RectTransform _dragIconRt;
             private Canvas _dragCanvas;
+            
+            // 3D Preview
+            private GameObject _previewObject;
 
             public void Init(ModelLibraryUI owner, PlaceableDefinition def)
             {
@@ -501,6 +521,7 @@ namespace Morphis.ModelPlacement
                 _dragCanvas = _owner._canvas;
                 if (_dragCanvas == null) return;
 
+                // 2D Icon
                 var icon = new GameObject("DragIcon");
                 icon.transform.SetParent(_dragCanvas.transform, false);
                 _dragIconRt = icon.AddComponent<RectTransform>();
@@ -525,11 +546,13 @@ namespace Morphis.ModelPlacement
                 tmp.raycastTarget = false;
 
                 UpdateDragIcon(eventData);
+                CreatePreview();
             }
 
             public void OnDrag(PointerEventData eventData)
             {
                 UpdateDragIcon(eventData);
+                UpdatePreview(eventData);
             }
 
             public void OnEndDrag(PointerEventData eventData)
@@ -539,6 +562,8 @@ namespace Morphis.ModelPlacement
                     Destroy(_dragIconRt.gameObject);
                     _dragIconRt = null;
                 }
+                
+                DestroyPreview();
 
                 // 仅当松手仍在“模型库面板区域”内时才视为取消放置。
                 // 不能用 IsPointerOverGameObject()：在新 Input System/复杂 UI 下容易误判，导致永远不放置。
@@ -561,6 +586,90 @@ namespace Morphis.ModelPlacement
                     out var localPos
                 );
                 _dragIconRt.anchoredPosition = localPos;
+            }
+
+            private void CreatePreview()
+            {
+                if (_previewObject != null) return;
+
+                // Create ghost based on type
+                if (_def.Prefab != null)
+                {
+                    _previewObject = Instantiate(_def.Prefab);
+                }
+                else if (_def.GlbAsset != null)
+                {
+                    // For GLB, we can't easily sync-load a preview if it's large. 
+                    // Fallback to a placeholder cube or try async load (complex for drag).
+                    // Let's use a subtle placeholder cube or sphere for now, 
+                    // OR if Glb logic allows fast load (it doesn't without coroutine).
+                    // So we use a Placeholder Primitive.
+                    _previewObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    _previewObject.name = "Preview_Placeholder";
+                }
+                else
+                {
+                    _previewObject = GameObject.CreatePrimitive(_def.FallbackPrimitive);
+                }
+
+                if (_previewObject == null) return;
+
+                // Scale it
+                ModelLibraryUI.NormalizeScale(_previewObject, 1.0f);
+
+                // Disable colliders so raycast ignores it
+                var colliders = _previewObject.GetComponentsInChildren<Collider>();
+                foreach (var c in colliders) c.enabled = false;
+
+                // Make it semi-transparent (Ghost)
+                var renderers = _previewObject.GetComponentsInChildren<Renderer>();
+                var ghostMat = new Material(Shader.Find("Standard")); // Or URP/Lit
+                ghostMat.SetFloat("_Mode", 3); // Transparent
+                ghostMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                ghostMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                ghostMat.SetInt("_ZWrite", 0);
+                ghostMat.DisableKeyword("_ALPHATEST_ON");
+                ghostMat.EnableKeyword("_ALPHABLEND_ON");
+                ghostMat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                ghostMat.renderQueue = 3000;
+                ghostMat.color = new Color(0.5f, 0.8f, 1f, 0.5f);
+
+                foreach (var r in renderers)
+                {
+                    r.sharedMaterial = ghostMat;
+                    r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
+                
+                // Note: Standard shader might not work in URP/HDRP perfectly transparently 
+                // without proper setup, but it's a good "best effort" for generic proj.
+            }
+
+            private void UpdatePreview(PointerEventData eventData)
+            {
+                if (_previewObject == null) return;
+                if (_owner == null) return;
+
+                if (_owner.GetPlacementInfo(eventData.position, out var worldPos, out var groundY))
+                {
+                    _previewObject.transform.position = worldPos;
+                    // Snap visually
+                    ModelLibraryUI.SnapToGround(_previewObject, groundY);
+                    _previewObject.SetActive(true);
+                }
+                else
+                {
+                    // Hide if invalid
+                    _previewObject.SetActive(false);
+                }
+            }
+
+            private void DestroyPreview()
+            {
+                if (_previewObject != null)
+                {
+                    Destroy(_previewObject);
+                    _previewObject = null;
+                }
             }
         }
     }
