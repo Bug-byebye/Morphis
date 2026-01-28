@@ -1,0 +1,99 @@
+"""
+世界快照 API 路由
+"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import Dict, Any
+from database import get_db
+from crud.world_snapshot import (
+    get_world_snapshot,
+    create_or_update_world_snapshot,
+)
+from schemas.world_snapshot import (
+    WorldSnapshotPayload,
+    WorldSnapshotResponse,
+    WorldSnapshotSimpleResponse,
+)
+
+router = APIRouter(prefix="/world", tags=["world"])
+
+
+@router.post(
+    "/{world_id}",
+    response_model=WorldSnapshotSimpleResponse,
+    status_code=status.HTTP_200_OK,
+    summary="创建或更新世界快照",
+    description="""
+    创建或更新世界快照：
+    - 如果 world_id 不存在 → 创建新记录，version=1
+    - 如果存在 → 覆盖 snapshot，version 自动 +1
+    
+    请求体应包含完整的世界快照数据（world_id, version, objects）
+    """
+)
+async def create_or_update_world(
+    world_id: str,
+    payload: WorldSnapshotPayload,
+    db: Session = Depends(get_db)
+):
+    """
+    POST /world/{world_id}
+    
+    创建或更新世界快照
+    """
+    try:
+        # 将整个 payload 转换为字典作为 snapshot 存储
+        snapshot_data = payload.model_dump()
+        
+        # 调用 CRUD 操作
+        result = create_or_update_world_snapshot(
+            db=db,
+            world_id=world_id,
+            snapshot_data=snapshot_data,
+            owner_id=None  # 预留字段，暂时为 None
+        )
+        
+        return WorldSnapshotSimpleResponse(
+            world_id=result.world_id,
+            version=result.version
+        )
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.get(
+    "/{world_id}",
+    response_model=WorldSnapshotResponse,
+    status_code=status.HTTP_200_OK,
+    summary="获取世界快照",
+    description="根据 world_id 获取最新版本的世界快照"
+)
+async def get_world(
+    world_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    GET /world/{world_id}
+    
+    获取世界快照
+    """
+    snapshot = get_world_snapshot(db=db, world_id=world_id)
+    
+    if not snapshot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"World '{world_id}' not found"
+        )
+    
+    return WorldSnapshotResponse(
+        world_id=snapshot.world_id,
+        version=snapshot.version,
+        snapshot=snapshot.snapshot,
+        owner_id=snapshot.owner_id,
+        created_at=snapshot.created_at,
+        updated_at=snapshot.updated_at
+    )
