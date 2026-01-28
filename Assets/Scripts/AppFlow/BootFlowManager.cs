@@ -642,6 +642,9 @@ namespace Morphis.AppFlow
                 var json = req.downloadHandler.text;
                 BuildWorkspaceListFromJson(json);
             }
+            
+            // 无论成功还是失败，都添加 mirror-test 选项
+            AddWorkspaceItem("mirror-test", "Mirror Test");
         }
 
         private IEnumerator EnterMainScene()
@@ -685,9 +688,9 @@ namespace Morphis.AppFlow
             // 等待一帧，确保 UI 完全隐藏
             yield return null;
 
-            // 无论选择哪个 workspace，统一进入 MainScene
-            var sceneToLoad = "MainScene";
-            Debug.Log($"[BootFlow] Loading scene: {sceneToLoad}");
+            // 根据选择的 workspace 决定加载哪个场景
+            var sceneToLoad = GetSceneNameForWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
+            Debug.Log($"[BootFlow] Loading scene: {sceneToLoad} (workspace: {_selectedWorkspaceId})");
             
             var op = SceneManager.LoadSceneAsync(sceneToLoad, LoadSceneMode.Single);
             
@@ -779,6 +782,7 @@ namespace Morphis.AppFlow
         {
             AddWorkspaceItem("ws-fake-001", "Couple Space (fake)");
             AddWorkspaceItem("ws-fake-002", "Home (fake)");
+            AddWorkspaceItem("mirror-test", "Mirror Test");
             SetStatus("Workspace list is currently fake UI. Hook real service later.");
         }
 
@@ -815,6 +819,8 @@ namespace Morphis.AppFlow
                 if (added == 0) throw new Exception("no items parsed");
 
                 SetStatus("Please select a workspace");
+                
+                // 注意：mirror-test 选项会在 LoadWorkspaces 方法中统一添加
             }
             catch
             {
@@ -1194,7 +1200,13 @@ namespace Morphis.AppFlow
         /// </summary>
         private string GetSceneNameForWorkspace(string workspaceId, string workspaceName)
         {
-            // 需求：不管用户选择什么 workspace，都进入 MainScene
+            // 特殊处理：mirror-test 选项加载 MirrorTestScene
+            if (workspaceId == "mirror-test")
+            {
+                return "MirrorTestScene";
+            }
+            
+            // 默认：其他所有 workspace 都进入 MainScene
             return "MainScene";
         }
     }

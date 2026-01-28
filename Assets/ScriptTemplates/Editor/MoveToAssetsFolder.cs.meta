@@ -14,5 +14,5 @@ AssetOrigin:
   productId: 129321
   packageName: Mirror
   packageVersion: 96.0.1
-  assetPath: Assets/Mirror/ScriptTemplates/Editor/MoveToAssetsFolder.cs
+  assetPath: Assets/ScriptTemplates/Editor/MoveToAssetsFolder.cs
   uploadId: 736421
