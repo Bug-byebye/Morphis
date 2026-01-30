@@ -24,7 +24,18 @@ import secrets
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
 
+# 导入世界快照路由和数据库初始化
+from routers import world
+from database import init_db
+
 app = FastAPI(title="AI Generation Pipeline Server")
+
+# 初始化数据库（自动创建表）
+try:
+    init_db()
+except Exception as e:
+    print(f"[Warning] Database initialization failed: {e}")
+    print("[Warning] Make sure PostgreSQL is running and DATABASE_URL is set correctly")
 
 # CORS 中间件 - 允许 Unity 跨域请求
 app.add_middleware(
@@ -34,6 +45,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 注册路由
+app.include_router(world.router)
 
 
 # ========== 请求模型 ==========
@@ -344,6 +358,8 @@ async def root():
             "POST /auth/login": "登录（占位实现）",
             "POST /auth/register": "注册（占位实现）",
             "GET /workspaces": "获取 workspace 列表（占位实现，Bearer token）",
+            "POST /world/{world_id}": "创建或更新世界快照",
+            "GET /world/{world_id}": "获取世界快照",
             "POST /text2image": "文字生成图片 (返回 PNG)",
             "POST /text2image/urls": "文字生成图片 (返回 URL 列表)",
             "GET /text2image/task/{task_id}": "查询文生图任务状态",
