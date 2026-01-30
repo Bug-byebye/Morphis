@@ -135,9 +135,9 @@ namespace Morphis.ModelPlacement
             contentRt.sizeDelta = new Vector2(0, 0);
 
             var layout = content.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(4, 4, 4, 4);
-            layout.spacing = 8;
-            layout.childControlHeight = true;
+            layout.padding = new RectOffset(10, 10, 10, 10);
+            layout.spacing = 10;
+            layout.childControlHeight = false; // We set height manually on items
             layout.childControlWidth = true;
             layout.childForceExpandHeight = false;
             layout.childForceExpandWidth = true;
@@ -234,14 +234,75 @@ namespace Morphis.ModelPlacement
 
             foreach (var item in _items)
             {
-                var row = CreateButton(_listRoot, item.DisplayName, new Color(0.18f, 0.18f, 0.24f));
-                // VerticalLayoutGroup 需要 LayoutElement 来提供高度，否则可能被压成 0 导致“看起来空白”
-                var le = row.gameObject.AddComponent<LayoutElement>();
-                le.preferredHeight = 44;
-                le.minHeight = 44;
+                // Container (Row Button)
+                var rowGO = new GameObject(item.DisplayName);
+                rowGO.transform.SetParent(_listRoot, false);
+                
+                // Layout Element for fixed height
+                var le = rowGO.AddComponent<LayoutElement>();
+                le.minHeight = 100;
+                le.preferredHeight = 100;
+                
+                var img = rowGO.AddComponent<Image>();
+                img.color = new Color(0.18f, 0.18f, 0.24f, 0.9f);
 
-                var drag = row.gameObject.AddComponent<PlaceableDragSource>();
+                var btn = rowGO.AddComponent<Button>();
+                btn.targetGraphic = img;
+
+                // 3D Preview (Left side)
+                var previewGO = new GameObject("Preview");
+                previewGO.transform.SetParent(rowGO.transform, false);
+                var rtPreview = previewGO.AddComponent<RectTransform>();
+                // Stick to left, square
+                rtPreview.anchorMin = new Vector2(0, 0); 
+                rtPreview.anchorMax = new Vector2(0, 1);
+                rtPreview.pivot = new Vector2(0, 0.5f);
+                rtPreview.sizeDelta = new Vector2(100, 0); // width 100
+                rtPreview.anchoredPosition = new Vector2(0, 0);
+                
+                // Inner Padding for image
+                var previewInner = new GameObject("Image");
+                previewInner.transform.SetParent(previewGO.transform, false);
+                var rtInner = previewInner.AddComponent<RectTransform>();
+                rtInner.anchorMin = Vector2.zero;
+                rtInner.anchorMax = Vector2.one;
+                rtInner.offsetMin = new Vector2(5, 5);
+                rtInner.offsetMax = new Vector2(-5, -5);
+                
+                var raw = previewInner.AddComponent<RawImage>();
+                raw.color = Color.white;
+                
+                // Generate Preview
+                if (item.Prefab != null)
+                {
+                    raw.texture = Morphis.Utils.RuntimePreviewGenerator.GenerateModelPreview(item.Prefab, 256, 256);
+                }
+                else
+                {
+                    raw.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+                }
+
+                // Name Label (Right side)
+                var lbl = CreateText(rowGO.transform, item.DisplayName, 24, FontStyles.Bold);
+                var lblRt = lbl.GetComponent<RectTransform>();
+                lblRt.anchorMin = new Vector2(0, 0);
+                lblRt.anchorMax = new Vector2(1, 1);
+                lblRt.pivot = new Vector2(0, 0.5f);
+                // Start after the preview image (100px) + some padding
+                lblRt.offsetMin = new Vector2(110, 0); 
+                lblRt.offsetMax = new Vector2(-10, 0);
+                
+                lbl.alignment = TextAlignmentOptions.MidlineLeft;
+                lbl.enableAutoSizing = false; // Use fixed large size
+
+                // Drag functionality
+                var drag = rowGO.AddComponent<PlaceableDragSource>();
                 drag.Init(this, item);
+                
+                // Click to spawn at center (fallback behavior)
+                btn.onClick.AddListener(() => {
+                    TryPlace(item, new Vector2(Screen.width/2f, Screen.height/2f));
+                });
             }
         }
 

@@ -11,18 +11,34 @@ namespace Morphis.ModelPlacement
     {
         [Header("Move")]
         [SerializeField] private float groundY = 0f;
+        [SerializeField] private float maxMoveRadius = 5.0f; // Limit range around player
 
         private Camera _cam;
-        private bool _dragging;
         private Collider[] _colliders;
+        // private Vector3 _dragOffset; // Removed to ensure center alignment
         
-        // Offset from the "floor hit point" to the "object anchor"
-        private Vector3 _dragOffset; 
+        private Transform _playerTransform;
+        private bool _moveMode = false;
+        private bool _dragging = false; 
 
         private void Awake()
         {
             _cam = Camera.main;
             _colliders = GetComponentsInChildren<Collider>();
+            FindPlayer();
+        }
+
+        private void FindPlayer()
+        {
+            if (_playerTransform != null) return;
+            var player = GameObject.FindGameObjectWithTag("Player");
+            if (player != null) _playerTransform = player.transform;
+            else
+            {
+                // Fallback
+                var controller = FindObjectOfType<StarterAssets.ThirdPersonController>();
+                if (controller != null) _playerTransform = controller.transform;
+            }
         }
 
         private void Update()
@@ -30,49 +46,114 @@ namespace Morphis.ModelPlacement
             if (_cam == null) _cam = Camera.main;
             if (_cam == null) return;
 
-            if (Input.GetMouseButtonDown(0))
+            // Block interaction ONLY if strictly over UI elements (Layer: UI)
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             {
-                TryStartDrag();
-            }
-            else if (Input.GetMouseButtonUp(0))
-            {
-                StopDrag();
+                var pointerData = new PointerEventData(EventSystem.current) { position = Input.mousePosition };
+                var results = new System.Collections.Generic.List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointerData, results);
+                
+                bool blockedByUI = false;
+                foreach (var result in results)
+                {
+                    if (result.gameObject.layer == 5) // UI layer
+                    {
+                        blockedByUI = true;
+                        break;
+                    }
+                }
+                
+                if (blockedByUI) return;
             }
 
-            if (_dragging)
+            // Mode 1: Moving (Dragging)
+            if (_moveMode)
             {
                 UpdateDrag();
+
+                if (Input.GetMouseButtonDown(0))
+                {
+                    TryPlace();
+                }
+            }
+            // Mode 2: Idle (Click to show menu)
+            else
+            {
+                if (Input.GetMouseButtonDown(0))
+                {
+                    TryShowContextMenu();
+                }
             }
         }
 
-        private void TryStartDrag()
+        private void TryShowContextMenu()
         {
-            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
-                return;
+            // Range check for opening menu too? 
+            // Optional: User might want to click distant objects. 
+            // For now, allow clicking, but restrict movement range once started.
 
             var ray = _cam.ScreenPointToRay(Input.mousePosition);
             if (Physics.Raycast(ray, out var hit))
             {
                 if (IsHitSelf(hit.collider))
                 {
-                    Debug.Log($"[PlaceableObjectMover] Started dragging {name}");
-                    _dragging = true;
-                    
-                    // Temporarily disable colliders to raycast "through" ourselves to find the floor
-                    SetCollidersEnabled(false);
-                    
-                    // Calculate initial offset: Where is the floor under the cursor?
-                    if (GetCursorGroundPoint(out var groundPoint, out var _))
+                    if (ObjectContextMenu.Instance != null)
                     {
-                        // The offset is the difference between current object pos and the ground point under cursor
-                        _dragOffset = transform.position - groundPoint;
-                    }
-                    else
-                    {
-                        // Fallback: just use 0 offset if we are floating in void
-                        _dragOffset = Vector3.zero;
+                        ObjectContextMenu.Instance.ShowMenu(
+                            gameObject,
+                            onMoveSelected: EnterMoveMode,
+                            onMessageSelected: ShowMessageDialog
+                        );
                     }
                 }
+            }
+        }
+
+        public void EnterMoveMode()
+        {
+            _moveMode = true;
+            _dragging = true;
+            SetCollidersEnabled(false);
+            
+            // We want snappier controls, so snapping center to mouse immediately
+            // _dragOffset = Vector3.zero; 
+            
+            FindPlayer(); // Ensure we have player ref
+            Debug.Log($"[PlaceableObjectMover] Entered Move Mode for {name}");
+        }
+
+        private void TryPlace()
+        {
+            _moveMode = false;
+            _dragging = false;
+            SetCollidersEnabled(true);
+            Debug.Log($"[PlaceableObjectMover] Placed {name}");
+        }
+
+        private void ShowMessageDialog()
+        {
+            // Auto-add InteractableObject if missing
+            var interactable = GetComponent<InteractableObject>();
+            if (interactable == null)
+            {
+                interactable = gameObject.AddComponent<InteractableObject>();
+            }
+
+            // Auto-create ObjectInteractionManager if missing
+            if (ObjectInteractionManager.Instance == null)
+            {
+                var managerObj = new GameObject("ObjectInteractionManager");
+                managerObj.AddComponent<ObjectInteractionManager>();
+            }
+
+            // Now show
+            if (interactable != null && ObjectInteractionManager.Instance != null)
+            {
+                ObjectInteractionManager.Instance.OnObjectClicked(interactable);
+            }
+            else
+            {
+                Debug.LogError("[PlaceableObjectMover] Failed to open message dialog.");
             }
         }
 
@@ -80,19 +161,30 @@ namespace Morphis.ModelPlacement
         {
             if (GetCursorGroundPoint(out var groundPoint, out var groundHeight))
             {
-                // New position = floor point + offset
-                var targetPos = groundPoint + _dragOffset;
-                
-                // Snap Y again to ensure we don't drift? 
-                // Actually, if we use offset, we preserve the original "On Floor" relationship.
-                // But ModelLibraryUI.SnapToGround enforces sticking to the floor.
-                // Let's apply targetPos first.
+                // Align center to cursor (no offset)
+                var targetPos = groundPoint;
+
+                // Restrict to Player Radius
+                if (_playerTransform != null)
+                {
+                    Vector3 playerPos = _playerTransform.position;
+                    // Planar distance check
+                    Vector3 objPosPlane = new Vector3(targetPos.x, 0, targetPos.z);
+                    Vector3 plyPosPlane = new Vector3(playerPos.x, 0, playerPos.z);
+                    
+                    float dist = Vector3.Distance(objPosPlane, plyPosPlane);
+                    if (dist > maxMoveRadius)
+                    {
+                        // Clamp to border
+                        Vector3 dir = (objPosPlane - plyPosPlane).normalized;
+                        Vector3 clampedPlane = plyPosPlane + dir * maxMoveRadius;
+                        targetPos.x = clampedPlane.x;
+                        targetPos.z = clampedPlane.z;
+                        // Y remains from ground point
+                    }
+                }
+
                 transform.position = targetPos;
-                
-                // Optional: Force re-snap to exact ground height if we assume object is resting
-                // ModelLibraryUI.SnapToGround(gameObject, groundHeight); 
-                // Re-snapping might fight with offset if offset included some Y lift. 
-                // Let's assume SnapToGround is authoritative for "resting" objects.
                 ModelLibraryUI.SnapToGround(gameObject, groundHeight);
             }
         }
