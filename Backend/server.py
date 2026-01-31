@@ -24,18 +24,18 @@ import secrets
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
 
-# 导入世界快照路由和数据库初始化
-from routers import world
-from database import init_db
+# 导入世界快照路由和数据库初始化（当前仅启动登录网关+AI 服务，以下暂不启用）
+# from routers import world
+# from database import init_db
 
 app = FastAPI(title="AI Generation Pipeline Server")
 
-# 初始化数据库（自动创建表）
-try:
-    init_db()
-except Exception as e:
-    print(f"[Warning] Database initialization failed: {e}")
-    print("[Warning] Make sure PostgreSQL is running and DATABASE_URL is set correctly")
+# 初始化数据库（自动创建表）- 世界快照等需 DB，仅登录+AI 时可不启用
+# try:
+#     init_db()
+# except Exception as e:
+#     print(f"[Warning] Database initialization failed: {e}")
+#     print("[Warning] Make sure PostgreSQL is running and DATABASE_URL is set correctly")
 
 # CORS 中间件 - 允许 Unity 跨域请求
 app.add_middleware(
@@ -46,8 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由
-app.include_router(world.router)
+# 注册路由（当前仅：登录网关 + AI 服务；世界快照路由已注释）
+# app.include_router(world.router)
 
 
 # ========== 请求模型 ==========

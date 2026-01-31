@@ -8,18 +8,18 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Game/Scenes/BootScene.unity
     guid: 5cafb857ed00a334cb8685802a07410b
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/SampleScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
   - enabled: 1
     path: Assets/SimpleLowPolyNature/Scenes/DemoDay.unity
     guid: 304a5748b784bc241be3c08d67013b21
   - enabled: 1
+    path: Assets/Game/Scenes/MainScene.unity
+    guid: 7d25b60f9e5f7fd4ebda82e342a23506
+  - enabled: 1
     path: Assets/Game/Scenes/demo.unity
     guid: 9fc0d4010bbf28b4594072e72b8655ab
-  - enabled: 1
-    path: Assets/Game/Scenes/MainScene.unity
-    guid: 7e7a3921321bd2643a11064e5901adac
   - enabled: 1
     path: Assets/StarterAssets/ThirdPersonController/Scenes/Playground.unity
     guid: e9017d5f96b9f09489b4b37e1d6eb914

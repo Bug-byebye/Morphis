@@ -1,27 +1,74 @@
 using UnityEngine;
 using Mirror;
-using LittleDog;
 
+/// <summary>
+/// 联机时：本地玩家启用控制，远程禁用。
+/// 1）若存在 ThirdPersonController + StarterAssetsInputs：启用它们并让场景 Cinemachine 跟随本玩家的 CinemachineCameraTarget（与 demo 一致）。
+/// 2）若不存在：使用备用逻辑，用旧 Input 实现与 demo 相同行为——鼠标控制视角、前后左右以视角为准。详见 DemoControlAnalysis.md。
+/// </summary>
+[RequireComponent(typeof(CharacterController))]
 public class NetworkPlayerController : NetworkBehaviour
 {
-    private PlayerController playerController;
-    private Camera playerCamera;
-    private Transform cameraPivot;
+    private MonoBehaviour _thirdPersonController;
+    private MonoBehaviour _inputs;
+    private Transform _cinemachineTarget;
 
-    [Header("第三人称鼠标视角")]
-    [SerializeField] private float mouseSensitivity = 100f;
-    [SerializeField] private float minPitch = -60f;
-    [SerializeField] private float maxPitch = 80f;
-    private float verticalAngle;
+    [Header("备用控制（无 ThirdPersonController 时）")]
+    [Tooltip("相机目标（玩家子物体），用于鼠标控制视角；不填则尝试查找子物体 CinemachineCameraTarget")]
+    [SerializeField] private Transform _cameraTargetFallback;
+    [SerializeField] private float _topClamp = 70f;
+    [SerializeField] private float _bottomClamp = -30f;
+    [SerializeField] private float _sensitivity = 1f;
+    [SerializeField] private float _moveSpeed = 2f;
+    [SerializeField] private float _sprintSpeed = 5.335f;
+    [SerializeField] private float _rotationSmoothTime = 0.12f;
+    [SerializeField] private float _speedChangeRate = 10f;
+    [SerializeField] private float _gravity = -15f;
+    [SerializeField] private float _jumpHeight = 1.2f;
+    [SerializeField] private float _groundedOffset = -0.14f;
+    [SerializeField] private float _groundedRadius = 0.28f;
+    [SerializeField] private LayerMask _groundLayers = ~0;
 
-    void Awake()
+    private CharacterController _controller;
+    private float _cinemachineTargetYaw;
+    private float _cinemachineTargetPitch;
+    private float _speed;
+    private float _targetRotation;
+    private float _rotationVelocity;
+    private float _verticalVelocity;
+    private const float TerminalVelocity = 53f;
+    private const float Threshold = 0.01f;
+    private bool _useFallback;
+
+    public static Camera LocalPlayerCamera { get; private set; }
+
+    private void Awake()
     {
-        playerController = GetComponent<PlayerController>();
-        playerCamera = GetComponentInChildren<Camera>(true);
-        if (playerCamera != null)
+        _controller = GetComponent<CharacterController>();
+
+        var tpcType = System.Type.GetType("StarterAssets.ThirdPersonController, Assembly-CSharp");
+        var inputsType = System.Type.GetType("StarterAssets.StarterAssetsInputs, Assembly-CSharp");
+        _thirdPersonController = tpcType != null ? (GetComponent(tpcType) as MonoBehaviour) : null;
+        _inputs = inputsType != null ? (GetComponent(inputsType) as MonoBehaviour) : null;
+
+        _useFallback = _thirdPersonController == null || _inputs == null;
+        if (_useFallback)
         {
-            cameraPivot = playerCamera.transform;
-            playerCamera.enabled = false; // 默认禁用，仅本地玩家在 OnStartLocalPlayer 中启用
+            if (_cameraTargetFallback == null)
+                _cameraTargetFallback = transform.Find("CinemachineCameraTarget");
+            if (_cameraTargetFallback == null)
+            {
+                var go = new GameObject("CinemachineCameraTarget");
+                go.transform.SetParent(transform);
+                go.transform.localPosition = Vector3.zero;
+                go.transform.localRotation = Quaternion.identity;
+                _cameraTargetFallback = go.transform;
+            }
+        }
+        else
+        {
+            if (_thirdPersonController != null) _thirdPersonController.enabled = false;
+            if (_inputs != null) _inputs.enabled = false;
         }
     }
 
@@ -29,16 +76,26 @@ public class NetworkPlayerController : NetworkBehaviour
     {
         base.OnStartLocalPlayer();
 
-        if (playerController != null)
-            PlayerController.canMove = true;
-
-        // 仅本地玩家：启用相机、初始化 CameraPivot、锁定并隐藏鼠标
-        if (playerCamera != null)
+        Transform followTarget = null;
+        if (_useFallback)
         {
-            playerCamera.enabled = true;
-            verticalAngle = cameraPivot.localEulerAngles.x;
-            if (verticalAngle > 180f) verticalAngle -= 360f;
+            followTarget = _cameraTargetFallback;
+            _cinemachineTargetYaw = transform.eulerAngles.y;
+            _targetRotation = _cinemachineTargetYaw;
+            _cinemachineTargetPitch = 0f;
         }
+        else
+        {
+            _cinemachineTarget = GetCinemachineCameraTarget(_thirdPersonController);
+            followTarget = _cinemachineTarget;
+            if (_thirdPersonController != null) _thirdPersonController.enabled = true;
+            if (_inputs != null) _inputs.enabled = true;
+        }
+
+        if (followTarget != null)
+            SetSceneVCamFollow(followTarget);
+
+        LocalPlayerCamera = Camera.main;
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }
@@ -47,28 +104,182 @@ public class NetworkPlayerController : NetworkBehaviour
     {
         base.OnStopLocalPlayer();
 
-        if (playerController != null)
-            PlayerController.canMove = false;
-
-        if (playerCamera != null)
-            playerCamera.enabled = false;
+        if (!_useFallback)
+        {
+            if (_thirdPersonController != null) _thirdPersonController.enabled = false;
+            if (_inputs != null) _inputs.enabled = false;
+        }
+        if (LocalPlayerCamera != null) LocalPlayerCamera = null;
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
     }
 
-    void LateUpdate()
+    private void Update()
     {
-        if (!isLocalPlayer || cameraPivot == null) return;
+        if (!isLocalPlayer || !_useFallback) return;
 
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (Cursor.lockState == CursorLockMode.Locked)
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+            else
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+        }
+        if (Cursor.lockState != CursorLockMode.Locked) return;
 
-        // Mouse X：Player 本体绕 Y 轴旋转（左右看）
-        transform.Rotate(Vector3.up * mouseX);
+        FallbackJumpAndGravity();
+        FallbackMove();
+    }
 
-        // Mouse Y：CameraPivot 绕 X 轴旋转（上下看），并限制角度
-        verticalAngle -= mouseY;
-        verticalAngle = Mathf.Clamp(verticalAngle, minPitch, maxPitch);
-        cameraPivot.localRotation = Quaternion.Euler(verticalAngle, 0f, 0f);
+    private void LateUpdate()
+    {
+        if (!isLocalPlayer || !_useFallback || _cameraTargetFallback == null) return;
+        if (Cursor.lockState != CursorLockMode.Locked) return;
+
+        FallbackCameraRotation();
+    }
+
+    private void FallbackCameraRotation()
+    {
+        float lookX = Input.GetAxis("Mouse X") * _sensitivity;
+        float lookY = Input.GetAxis("Mouse Y") * _sensitivity;
+
+        if (lookX * lookX + lookY * lookY >= Threshold * Threshold)
+        {
+            _cinemachineTargetYaw += lookX;
+            _cinemachineTargetPitch += lookY;
+        }
+
+        _cinemachineTargetYaw = ClampAngle(_cinemachineTargetYaw, float.MinValue, float.MaxValue);
+        _cinemachineTargetPitch = ClampAngle(_cinemachineTargetPitch, _bottomClamp, _topClamp);
+
+        _cameraTargetFallback.rotation = Quaternion.Euler(_cinemachineTargetPitch, _cinemachineTargetYaw, 0f);
+    }
+
+    private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
+    {
+        if (lfAngle < -360f) lfAngle += 360f;
+        if (lfAngle > 360f) lfAngle -= 360f;
+        return Mathf.Clamp(lfAngle, lfMin, lfMax);
+    }
+
+    private bool FallbackGroundedCheck()
+    {
+        var p = transform.position;
+        var spherePosition = new Vector3(p.x, p.y - _groundedOffset, p.z);
+        return Physics.CheckSphere(spherePosition, _groundedRadius, _groundLayers, QueryTriggerInteraction.Ignore);
+    }
+
+    private void FallbackJumpAndGravity()
+    {
+        bool grounded = FallbackGroundedCheck();
+
+        if (grounded)
+        {
+            if (_verticalVelocity < 0f) _verticalVelocity = -2f;
+            if (Input.GetButtonDown("Jump"))
+                _verticalVelocity = Mathf.Sqrt(_jumpHeight * -2f * _gravity);
+        }
+
+        if (_verticalVelocity < TerminalVelocity)
+            _verticalVelocity += _gravity * Time.deltaTime;
+    }
+
+    private void FallbackMove()
+    {
+        if (_controller == null) return;
+
+        float targetSpeed = Input.GetKey(KeyCode.LeftShift) ? _sprintSpeed : _moveSpeed;
+        Vector2 inputMove = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
+        if (inputMove.sqrMagnitude < Threshold * Threshold) targetSpeed = 0f;
+
+        float currentHorizontalSpeed = new Vector3(_controller.velocity.x, 0f, _controller.velocity.z).magnitude;
+        float inputMagnitude = 1f;
+        float speedOffset = 0.1f;
+
+        if (currentHorizontalSpeed < targetSpeed - speedOffset || currentHorizontalSpeed > targetSpeed + speedOffset)
+        {
+            _speed = Mathf.Lerp(currentHorizontalSpeed, targetSpeed * inputMagnitude, Time.deltaTime * _speedChangeRate);
+            _speed = Mathf.Round(_speed * 1000f) / 1000f;
+        }
+        else
+        {
+            _speed = targetSpeed;
+        }
+
+        Vector3 inputDirection = new Vector3(inputMove.x, 0f, inputMove.y).normalized;
+
+        if (inputMove.sqrMagnitude >= Threshold * Threshold)
+        {
+            float cameraYaw = _cinemachineTargetYaw;
+            _targetRotation = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg + cameraYaw;
+            float rotation = Mathf.SmoothDampAngle(transform.eulerAngles.y, _targetRotation, ref _rotationVelocity, _rotationSmoothTime);
+            transform.rotation = Quaternion.Euler(0f, rotation, 0f);
+        }
+
+        Vector3 targetDirection = Quaternion.Euler(0f, _targetRotation, 0f) * Vector3.forward;
+        _controller.Move(targetDirection.normalized * (_speed * Time.deltaTime) + new Vector3(0f, _verticalVelocity * Time.deltaTime, 0f));
+    }
+
+    private static Transform GetCinemachineCameraTarget(MonoBehaviour thirdPersonController)
+    {
+        if (thirdPersonController == null) return null;
+        var t = thirdPersonController.GetType();
+        var prop = t.GetProperty("CinemachineCameraTarget");
+        if (prop == null) return null;
+        var go = prop.GetValue(thirdPersonController) as GameObject;
+        return go != null ? go.transform : null;
+    }
+
+    private static void SetSceneVCamFollow(Transform followTarget)
+    {
+        var vcamType = System.Type.GetType("Cinemachine.CinemachineVirtualCamera,Cinemachine");
+        if (vcamType == null) return;
+#pragma warning disable 0618
+        var vcam = Object.FindObjectOfType(vcamType);
+#pragma warning restore 0618
+        if (vcam == null)
+        {
+            Debug.LogWarning("[NetworkPlayerController] 场景中未找到 CinemachineVirtualCamera，请放置与 demo 一致的 PlayerFollowCamera。");
+            return;
+        }
+        var followProp = vcamType.GetProperty("Follow");
+        if (followProp != null)
+            followProp.SetValue(vcam, followTarget);
+    }
+
+    public static Ray GetLocalPlayerScreenPointToRay(Vector3 screenPosition)
+    {
+        if (LocalPlayerCamera != null)
+            return LocalPlayerCamera.ScreenPointToRay(screenPosition);
+        Debug.LogWarning("[NetworkPlayerController] LocalPlayerCamera 为 null");
+        return new Ray();
+    }
+
+    public static Vector3 GetCameraForward()
+    {
+        if (LocalPlayerCamera != null)
+            return LocalPlayerCamera.transform.forward;
+        return Vector3.forward;
+    }
+
+    public static Vector3 GetCameraRight()
+    {
+        if (LocalPlayerCamera != null)
+            return LocalPlayerCamera.transform.right;
+        return Vector3.right;
+    }
+
+    public static Vector3 GetCameraPosition()
+    {
+        if (LocalPlayerCamera != null)
+            return LocalPlayerCamera.transform.position;
+        return Vector3.zero;
     }
 }
