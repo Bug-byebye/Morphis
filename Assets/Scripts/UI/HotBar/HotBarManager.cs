@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using GLTFast;
+using Morphis.WorldSnapshot;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -278,6 +279,7 @@ namespace Morphis.UI.HotBar
                 EnsureColliderFromRenderers(go);
                 NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
                 EnsurePlaceableComponents(go);
+                WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(go, $"{resourcesPath}/{item.Name}");
                 return true;
             }
 
@@ -293,6 +295,7 @@ namespace Morphis.UI.HotBar
                 go.transform.position = worldPos;
                 NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
                 EnsurePlaceableComponents(go);
+                WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(go, $"primitive:{item.FallbackPrimitive}");
                 return true;
             }
         }
@@ -326,6 +329,7 @@ namespace Morphis.UI.HotBar
             EnsureColliderFromRenderers(root);
             NormalizeScaleAndSnapToGround(root, groundY, targetSize: 1.0f);
             EnsurePlaceableComponents(root);
+            WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(root, $"glb:{displayName}");
         }
 
         private void EnsurePlaceableComponents(GameObject go)

@@ -14,8 +14,9 @@ FastAPI 服务：为 Unity 节点编辑器提供各种 AI 生成 API
 from dotenv import load_dotenv
 load_dotenv()  # 加载 .env 文件
 
-from fastapi import FastAPI, Response, File, UploadFile, Form, Header
+from fastapi import FastAPI, Response, File, UploadFile, Form, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 import base64
@@ -24,18 +25,23 @@ import secrets
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
 
-# 导入世界快照路由和数据库初始化（当前仅启动登录网关+AI 服务，以下暂不启用）
-# from routers import world
-# from database import init_db
+# 导入世界快照路由和数据库初始化
+from routers import world
+from database import init_db, get_db
+from crud import get_user_by_username, create_user, get_workspaces_for_user, get_or_create_world, create_workspace_with_coowners
+from models.world import WorldMember
 
 app = FastAPI(title="AI Generation Pipeline Server")
 
-# 初始化数据库（自动创建表）- 世界快照等需 DB，仅登录+AI 时可不启用
-# try:
-#     init_db()
-# except Exception as e:
-#     print(f"[Warning] Database initialization failed: {e}")
-#     print("[Warning] Make sure PostgreSQL is running and DATABASE_URL is set correctly")
+
+@app.on_event("startup")
+def startup_db():
+    """启动时连接数据库并建表；连接失败则抛错并阻止服务启动（不静默失败）"""
+    init_db()
+
+
+# 注册世界快照路由
+app.include_router(world.router)
 
 # CORS 中间件 - 允许 Unity 跨域请求
 app.add_middleware(
@@ -46,8 +52,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由（当前仅：登录网关 + AI 服务；世界快照路由已注释）
-# app.include_router(world.router)
 
 
 # ========== 请求模型 ==========
@@ -84,31 +88,20 @@ class WorkspaceListResponse(BaseModel):
     items: List[WorkspaceDto]
 
 
-# ========== 简易内存存储（占位实现） ==========
+class CreateWorkspaceRequest(BaseModel):
+    name: Optional[str] = None
+    co_owner_usernames: Optional[List[str]] = None
 
-# 默认账号（你要求的 111111/111111）
-_users: Dict[str, str] = {
-    "111111": "111111",
-    "test": "test",
-    "demo": "demo",
-}
 
-# token -> username
+class CreateWorkspaceResponse(BaseModel):
+    id: str
+    name: str
+
+
+# ========== 会话：token -> username（内存，重启后需重新登录） ==========
+
 _tokens: Dict[str, str] = {}
 
-# username -> workspaces（先做伪数据；后续可接数据库）
-_workspaces_by_user: Dict[str, List[WorkspaceDto]] = {
-    "111111": [
-        WorkspaceDto(id="ws-love-001", name="Couple Space 001", members=["111111", "partner"]),
-        WorkspaceDto(id="ws-cozy-002", name="Cozy Home 002", members=["111111"]),
-    ],
-    "test": [
-        WorkspaceDto(id="ws-test-001", name="Test Workspace", members=["test"]),
-    ],
-    "demo": [
-        WorkspaceDto(id="ws-demo-001", name="Demo Space", members=["demo", "partner"]),
-    ],
-}
 
 def _require_user(authorization: Optional[str]) -> str:
     """
@@ -128,12 +121,12 @@ def _require_user(authorization: Optional[str]) -> str:
 # ========== API 端点 ==========
 
 @app.post("/auth/login", response_model=AuthResponse)
-async def auth_login(request: AuthLoginRequest):
+async def auth_login(request: AuthLoginRequest, db: Session = Depends(get_db)):
     """
-    登录（占位实现，后续替换为真实鉴权/数据库）
+    登录（数据库校验：按用户名查 User，密码明文匹配）
     """
-    pwd = _users.get(request.username)
-    if pwd is None or pwd != request.password:
+    user = get_user_by_username(db, request.username)
+    if user is None or user.password != request.password:
         return Response(content="Invalid username or password", status_code=401)
     token = secrets.token_urlsafe(24)
     _tokens[token] = request.username
@@ -141,37 +134,77 @@ async def auth_login(request: AuthLoginRequest):
 
 
 @app.post("/auth/register", response_model=AuthResponse)
-async def auth_register(request: AuthRegisterRequest):
+async def auth_register(request: AuthRegisterRequest, db: Session = Depends(get_db)):
     """
-    注册（占位实现）
+    注册（写入 User 表；可选创建默认 World 并加入 WorldMember）
     """
-    if request.username in _users:
-        return Response(content="Username already exists", status_code=409)
     if not request.username or not request.password:
         return Response(content="Username/password required", status_code=400)
-    _users[request.username] = request.password
-    # 给新用户一个默认空间（也可以为空）
-    _workspaces_by_user.setdefault(
-        request.username,
-        [WorkspaceDto(id=f"ws-{request.username}-001", name="我的第一个空间", members=[request.username])]
-    )
+    if get_user_by_username(db, request.username) is not None:
+        return Response(content="Username already exists", status_code=409)
+    user = create_user(db, username=request.username, password=request.password, email=None)
+    # 给新用户一个默认世界并设为 owner + member
+    default_world_id = f"ws-{request.username}-001"
+    get_or_create_world(db, world_id=default_world_id, name="My First Space", owner_user_id=user.id)
+    member = WorldMember(world_id=default_world_id, user_id=user.id)
+    db.add(member)
+    db.commit()
     token = secrets.token_urlsafe(24)
     _tokens[token] = request.username
     return AuthResponse(token=token, username=request.username)
 
 
-@app.get("/workspaces", response_model=WorkspaceListResponse)
-async def list_workspaces(authorization: Optional[str] = Header(default=None)):
+@app.post("/workspaces/create", response_model=CreateWorkspaceResponse)
+async def create_workspace(
+    request: CreateWorkspaceRequest,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
     """
-    获取当前账号的 workspace 列表（占位实现）
-    Header:
-      Authorization: Bearer <token>
+    Create a new workspace (space). Current user becomes owner.
+    Optionally add co-owners by their usernames.
     """
     try:
         username = _require_user(authorization)
     except ValueError as e:
         return Response(content=str(e), status_code=401)
-    return WorkspaceListResponse(items=_workspaces_by_user.get(username, []))
+    user = get_user_by_username(db, username)
+    if user is None:
+        return Response(content="User not found", status_code=401)
+
+    name = (request.name or "").strip() or "My Space"
+    co_usernames = [u.strip() for u in (request.co_owner_usernames or []) if u and u.strip()]
+    try:
+        world = create_workspace_with_coowners(
+            db=db,
+            owner_user_id=user.id,
+            name=name,
+            co_owner_usernames=co_usernames,
+        )
+        return CreateWorkspaceResponse(id=world.id, name=world.name)
+    except Exception as e:
+        return Response(content=str(e), status_code=400)
+
+
+@app.get("/workspaces", response_model=WorkspaceListResponse)
+async def list_workspaces(
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    获取当前账号的 workspace 列表（从 World + WorldMember 查）
+    Header: Authorization: Bearer <token>
+    """
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+    user = get_user_by_username(db, username)
+    if user is None:
+        return Response(content="User not found", status_code=401)
+    rows = get_workspaces_for_user(db, user.id)
+    items = [WorkspaceDto(id=r["id"], name=r["name"], members=r["members"]) for r in rows]
+    return WorkspaceListResponse(items=items)
 
 
 @app.post("/text2image")
@@ -355,9 +388,10 @@ async def root():
         "name": "AI Generation Pipeline",
         "version": "1.0.0",
         "endpoints": {
-            "POST /auth/login": "登录（占位实现）",
-            "POST /auth/register": "注册（占位实现）",
-            "GET /workspaces": "获取 workspace 列表（占位实现，Bearer token）",
+            "POST /auth/login": "登录（数据库校验）",
+            "POST /auth/register": "注册（写入 User + 默认 World）",
+            "GET /workspaces": "List workspaces (World + WorldMember)",
+            "POST /workspaces/create": "Create workspace with optional co-owners",
             "POST /world/{world_id}": "创建或更新世界快照",
             "GET /world/{world_id}": "获取世界快照",
             "POST /text2image": "文字生成图片 (返回 PNG)",

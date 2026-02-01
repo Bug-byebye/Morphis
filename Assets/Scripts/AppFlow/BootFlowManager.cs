@@ -46,14 +46,23 @@ namespace Morphis.AppFlow
         private GameObject _workspacePanel;
         private Transform _workspaceListRoot;
         private Button _enterBtn;
+        private Button _createSpaceBtn;
         private string _selectedWorkspaceId;
         private string _selectedWorkspaceName;
+
+        // 创建空间 UI
+        private GameObject _createSpacePanel;
+        private TMP_InputField _spaceNameInput;
+        private TMP_InputField _coOwnerUsernameInput;
+        private Button _createSpaceSubmitBtn;
+        private Button _createSpaceBackBtn;
 
         private bool _busy;
 
         private string LoginUrl => $"{AppSession.BaseUrl}/auth/login";
         private string RegisterUrl => $"{AppSession.BaseUrl}/auth/register";
         private string WorkspacesUrl => $"{AppSession.BaseUrl}/workspaces";
+        private string CreateWorkspaceUrl => $"{AppSession.BaseUrl}/workspaces/create";
 
         private static BootFlowManager _instance;
         private bool _initialized;
@@ -346,6 +355,7 @@ namespace Morphis.AppFlow
             // Panels
             _loginPanel = BuildLoginPanel(root.transform);
             _workspacePanel = BuildWorkspacePanel(root.transform);
+            _createSpacePanel = BuildCreateSpacePanel(root.transform);
 
             // 进入引导时，必须确保鼠标可用（能点 UI）
             SetCursorForUI(true);
@@ -505,13 +515,196 @@ namespace Morphis.AppFlow
             _enterBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(EnterMainScene()); });
             _enterBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 32;
 
+            // Create Space button
+            _createSpaceBtn = CreateButton(panel.transform, "Create Space", new Color(0.40f, 0.65f, 0.40f));
+            var createRect = _createSpaceBtn.GetComponent<RectTransform>();
+            createRect.anchorMin = new Vector2(0.5f, 0);
+            createRect.anchorMax = new Vector2(0.5f, 0);
+            createRect.pivot = new Vector2(0.5f, 0);
+            createRect.sizeDelta = new Vector2(240, 60);
+            createRect.anchoredPosition = new Vector2(0, 10);
+            _createSpaceBtn.onClick.AddListener(() => { if (!_busy) ShowCreateSpace(); });
+            _createSpaceBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
+
             return panel;
+        }
+
+        private GameObject BuildCreateSpacePanel(Transform parent)
+        {
+            var panel = CreatePanel(parent, "CreateSpacePanel");
+            panel.SetActive(false);
+
+            float contentWidth = 500;
+            float inputHeight = 60;
+            float labelHeight = 40;
+            float fontSizeLabel = 28;
+            float buttonHeight = 55;
+            float startY = 80;
+            float gap = 30;
+
+            // Header
+            var header = CreateText(panel.transform, "Create New Space", 36, FontStyles.Bold);
+            var headerRect = header.GetComponent<RectTransform>();
+            headerRect.anchorMin = new Vector2(0.5f, 1);
+            headerRect.anchorMax = new Vector2(0.5f, 1);
+            headerRect.pivot = new Vector2(0.5f, 1);
+            headerRect.sizeDelta = new Vector2(contentWidth, 50);
+            headerRect.anchoredPosition = new Vector2(0, -20);
+            header.alignment = TextAlignmentOptions.Center;
+
+            // Space Name
+            var nameLabel = CreateText(panel.transform, "Space Name (optional)", fontSizeLabel, FontStyles.Normal);
+            var nameLabelRect = nameLabel.rectTransform;
+            nameLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
+            nameLabelRect.anchorMin = new Vector2(0.5f, 1);
+            nameLabelRect.anchorMax = new Vector2(0.5f, 1);
+            nameLabelRect.pivot = new Vector2(0, 1);
+            nameLabelRect.anchoredPosition = new Vector2(-contentWidth / 2, -startY);
+            nameLabel.alignment = TextAlignmentOptions.BottomLeft;
+
+            _spaceNameInput = CreateInput(panel.transform, "My Space");
+            var nameInRt = _spaceNameInput.GetComponent<RectTransform>();
+            nameInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
+            PositionRow(nameInRt, y: startY + labelHeight + 10);
+
+            // Co-owner Username
+            float coOwnerY = startY + labelHeight + inputHeight + gap;
+            var coOwnerLabel = CreateText(panel.transform, "Co-owner Username (optional)", fontSizeLabel, FontStyles.Normal);
+            var coOwnerLabelRect = coOwnerLabel.rectTransform;
+            coOwnerLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
+            coOwnerLabelRect.anchorMin = new Vector2(0.5f, 1);
+            coOwnerLabelRect.anchorMax = new Vector2(0.5f, 1);
+            coOwnerLabelRect.pivot = new Vector2(0, 1);
+            coOwnerLabelRect.anchoredPosition = new Vector2(-contentWidth / 2, -coOwnerY);
+            coOwnerLabel.alignment = TextAlignmentOptions.BottomLeft;
+
+            _coOwnerUsernameInput = CreateInput(panel.transform, "Enter username to share with");
+            var coOwnerInRt = _coOwnerUsernameInput.GetComponent<RectTransform>();
+            coOwnerInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
+            PositionRow(coOwnerInRt, y: coOwnerY + labelHeight + 10);
+
+            // Buttons
+            float btnY = coOwnerY + labelHeight + inputHeight + gap * 2;
+
+            _createSpaceSubmitBtn = CreateButton(panel.transform, "Create", new Color(0.30f, 0.70f, 0.45f));
+            var submitRt = _createSpaceSubmitBtn.GetComponent<RectTransform>();
+            submitRt.anchorMin = new Vector2(0.5f, 1);
+            submitRt.anchorMax = new Vector2(0.5f, 1);
+            submitRt.pivot = new Vector2(0.5f, 1);
+            submitRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
+            submitRt.anchoredPosition = new Vector2(-contentWidth * 0.24f - 5, -btnY);
+            _createSpaceSubmitBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(CreateSpace()); });
+            _createSpaceSubmitBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
+
+            _createSpaceBackBtn = CreateButton(panel.transform, "Back", new Color(0.45f, 0.45f, 0.50f));
+            var backRt = _createSpaceBackBtn.GetComponent<RectTransform>();
+            backRt.anchorMin = new Vector2(0.5f, 1);
+            backRt.anchorMax = new Vector2(0.5f, 1);
+            backRt.pivot = new Vector2(0.5f, 1);
+            backRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
+            backRt.anchoredPosition = new Vector2(contentWidth * 0.24f + 5, -btnY);
+            _createSpaceBackBtn.onClick.AddListener(() => { if (!_busy) HideCreateSpace(); });
+            _createSpaceBackBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
+
+            return panel;
+        }
+
+        private void ShowCreateSpace()
+        {
+            _workspacePanel.SetActive(false);
+            _createSpacePanel.SetActive(true);
+            if (_spaceNameInput != null) _spaceNameInput.text = "";
+            if (_coOwnerUsernameInput != null) _coOwnerUsernameInput.text = "";
+            SetStatus("Create a new space and optionally add a co-owner");
+        }
+
+        private void HideCreateSpace()
+        {
+            _createSpacePanel.SetActive(false);
+            _workspacePanel.SetActive(true);
+            SetStatus("Please select a workspace");
+        }
+
+        private IEnumerator CreateSpace()
+        {
+            _busy = true;
+            SetButtons(false);
+            if (_createSpaceSubmitBtn != null) _createSpaceSubmitBtn.interactable = false;
+            if (_createSpaceBackBtn != null) _createSpaceBackBtn.interactable = false;
+
+            var spaceName = _spaceNameInput?.text?.Trim() ?? "";
+            var coOwnerUsername = _coOwnerUsernameInput?.text?.Trim() ?? "";
+
+            if (string.IsNullOrEmpty(spaceName))
+            {
+                spaceName = "My Space";
+            }
+
+            var coOwnerList = new System.Collections.Generic.List<string>();
+            if (!string.IsNullOrEmpty(coOwnerUsername))
+            {
+                coOwnerList.Add(coOwnerUsername);
+            }
+
+            var body = $"{{\"name\":\"{EscapeJson(spaceName)}\",\"co_owner_usernames\":[{string.Join(",", coOwnerList.ConvertAll(u => $"\"{EscapeJson(u)}\""))}]}}";
+
+            SetStatus("Creating space...");
+
+            using (var req = new UnityWebRequest(CreateWorkspaceUrl, "POST"))
+            {
+                var bodyRaw = Encoding.UTF8.GetBytes(body);
+                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type", "application/json");
+                req.SetRequestHeader("Authorization", $"Bearer {AppSession.Token}");
+
+                yield return req.SendWebRequest();
+
+                if (req.result != UnityWebRequest.Result.Success)
+                {
+                    SetStatus($"Create failed: {req.error}");
+                    if (_createSpaceSubmitBtn != null) _createSpaceSubmitBtn.interactable = true;
+                    if (_createSpaceBackBtn != null) _createSpaceBackBtn.interactable = true;
+                    SetButtons(true);
+                    _busy = false;
+                    yield break;
+                }
+
+                if (req.responseCode >= 400)
+                {
+                    SetStatus($"Create failed ({req.responseCode}): {req.downloadHandler.text}");
+                    if (_createSpaceSubmitBtn != null) _createSpaceSubmitBtn.interactable = true;
+                    if (_createSpaceBackBtn != null) _createSpaceBackBtn.interactable = true;
+                    SetButtons(true);
+                    _busy = false;
+                    yield break;
+                }
+
+                var json = req.downloadHandler.text;
+                var id = ExtractJsonField(json, "id");
+                var name = ExtractJsonField(json, "name");
+                if (!string.IsNullOrEmpty(id))
+                {
+                    SetStatus($"Space created: {name ?? id}");
+                    HideCreateSpace();
+                    yield return LoadWorkspaces();
+                    _selectedWorkspaceId = id;
+                    _selectedWorkspaceName = name ?? id;
+                    SetStatus($"Selected: {name ?? id}");
+                }
+            }
+
+            if (_createSpaceSubmitBtn != null) _createSpaceSubmitBtn.interactable = true;
+            if (_createSpaceBackBtn != null) _createSpaceBackBtn.interactable = true;
+            SetButtons(true);
+            _busy = false;
         }
 
         private void ShowLogin()
         {
             _loginPanel.SetActive(true);
             _workspacePanel.SetActive(false);
+            if (_createSpacePanel != null) _createSpacePanel.SetActive(false);
             _selectedWorkspaceId = null;
             _selectedWorkspaceName = null;
             SetCursorForUI(true);
@@ -521,6 +714,7 @@ namespace Morphis.AppFlow
         {
             _loginPanel.SetActive(false);
             _workspacePanel.SetActive(true);
+            if (_createSpacePanel != null) _createSpacePanel.SetActive(false);
             SetCursorForUI(true);
         }
 
@@ -858,6 +1052,9 @@ namespace Morphis.AppFlow
             if (_loginBtn != null) _loginBtn.interactable = enabled;
             if (_registerBtn != null) _registerBtn.interactable = enabled;
             if (_enterBtn != null) _enterBtn.interactable = enabled;
+            if (_createSpaceBtn != null) _createSpaceBtn.interactable = enabled;
+            if (_createSpaceSubmitBtn != null) _createSpaceSubmitBtn.interactable = enabled;
+            if (_createSpaceBackBtn != null) _createSpaceBackBtn.interactable = enabled;
         }
 
         private void SetStatus(string msg)

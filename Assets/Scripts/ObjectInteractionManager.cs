@@ -37,6 +37,19 @@ public class ObjectInteractionManager : MonoBehaviour
             return;
         }
     }
+
+    /// <summary> 清空当前引用，避免访问已被销毁的物体（如 WorldSnapshot 加载时清空世界后） </summary>
+    public static void ClearTargetsIfExists()
+    {
+        if (Instance == null) return;
+        Instance.currentTarget = null;
+        Instance.hoveredObject = null;
+        Instance.draggingObject = null;
+        if (Instance.commentDialog != null && Instance.commentDialog)
+            Instance.commentDialog.SetActive(false);
+        if (Instance.tooltipPanel != null && Instance.tooltipPanel)
+            Instance.tooltipPanel.SetActive(false);
+    }
     
     void Start()
     {
@@ -279,8 +292,12 @@ public class ObjectInteractionManager : MonoBehaviour
     
     void Update()
     {
+        // 若引用已被销毁，清空（避免 MissingReferenceException）
+        if (currentTarget != null && !currentTarget) currentTarget = null;
+        if (hoveredObject != null && !hoveredObject) hoveredObject = null;
+        if (draggingObject != null && !draggingObject) draggingObject = null;
         // Add ESC key support to close dialog
-        if (commentDialog != null && commentDialog.activeSelf)
+        if (commentDialog != null && commentDialog && commentDialog.activeSelf)
         {
             // Check both Legacy and New Input System
             if (Input.GetKeyDown(KeyCode.Escape))
@@ -299,7 +316,7 @@ public class ObjectInteractionManager : MonoBehaviour
         HandleInteraction();
         
         // 更新 tooltip 位置跟随鼠标
-        if (tooltipPanel != null && tooltipPanel.activeSelf)
+        if (tooltipPanel != null && tooltipPanel && tooltipPanel.activeSelf)
         {
             Vector2 mousePos = Vector2.zero;
             if (UnityEngine.InputSystem.Mouse.current != null)
@@ -314,6 +331,7 @@ public class ObjectInteractionManager : MonoBehaviour
     
     private void HandleInteraction()
     {
+        if (commentDialog == null || !commentDialog) return;
         // 如果对话框打开，不处理交互
         if (commentDialog.activeSelf) return;
         

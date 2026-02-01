@@ -136,7 +136,7 @@ namespace Morphis.WorldSnapshot
         }
 
         /// <summary>
-        /// 获取 Prefab
+        /// 获取 Prefab（支持运行时注册、ScriptableObject、Resources/Placeables/、primitive: 由 Applier 单独处理）
         /// </summary>
         public static GameObject GetPrefab(string prefabId)
         {
@@ -149,10 +149,26 @@ namespace Morphis.WorldSnapshot
             // 再检查 ScriptableObject 中的 Prefab
             if (_instance != null)
             {
-                return _instance.GetPrefab(prefabId);
+                var fromRegistry = _instance.GetPrefab(prefabId);
+                if (fromRegistry != null) return fromRegistry;
             }
 
-            Debug.LogWarning("[PrefabRegistryManager] No registry instance set. Use PrefabRegistryManager.SetRegistry() first.");
+            // 与后端/场景保存一致：Placeables/XXX 从 Resources 加载（与 ModelLibrary 约定一致）
+            if (prefabId != null && prefabId.StartsWith("Placeables/"))
+            {
+                var loaded = Resources.Load<GameObject>(prefabId);
+                if (loaded != null)
+                {
+                    _runtimePrefabs[prefabId] = loaded;
+                    return loaded;
+                }
+            }
+
+            // primitive: 由 WorldSnapshotApplier 在应用时创建，此处返回 null
+            if (prefabId != null && prefabId.StartsWith("primitive:"))
+                return null;
+
+            Debug.LogWarning($"[PrefabRegistryManager] Prefab not found for id: {prefabId}");
             return null;
         }
 

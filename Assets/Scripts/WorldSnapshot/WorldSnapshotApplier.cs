@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Morphis.ModelPlacement;
 
 namespace Morphis.WorldSnapshot
 {
@@ -36,13 +38,16 @@ namespace Morphis.WorldSnapshot
 
             Debug.Log($"[WorldSnapshotApplier] Applying snapshot for world '{snapshot.world_id}', version {snapshot.version}, objects: {snapshot.objects.Count}");
 
-            // 1. 清空现有物体（如果需要）
+            // 1. 清空前先通知 ObjectInteractionManager 清空引用，避免访问已销毁对象
+            ObjectInteractionManager.ClearTargetsIfExists();
+
+            // 2. 清空现有物体（如果需要）
             if (clearExisting)
             {
                 ClearAllWorldObjects();
             }
 
-            // 2. 实例化所有物体
+            // 3. 实例化所有物体
             int successCount = 0;
             int failCount = 0;
 
@@ -55,22 +60,57 @@ namespace Morphis.WorldSnapshot
                     continue;
                 }
 
+                GameObject instance = null;
+
+                // primitive:XXX 由本处创建（与 ModelLibrary/HotBar 放置时 prefab_id 一致）
+                if (objData.prefab_id.StartsWith("primitive:"))
+                {
+                    var typeStr = objData.prefab_id.Substring("primitive:".Length);
+                    if (Enum.TryParse<PrimitiveType>(typeStr, true, out var primitiveType))
+                    {
+                        instance = GameObject.CreatePrimitive(primitiveType);
+                        instance.name = typeStr;
+                        if (parent != null) instance.transform.SetParent(parent);
+                        instance.transform.position = objData.position;
+                        instance.transform.rotation = objData.rotation;
+                        instance.transform.localScale = objData.scale;
+                        if (instance.GetComponent<PlaceableObjectMover>() == null) instance.AddComponent<PlaceableObjectMover>();
+                        if (instance.GetComponent<InteractableObject>() == null) instance.AddComponent<InteractableObject>();
+                        var wo = instance.GetComponent<WorldObject>();
+                        if (wo == null) wo = instance.AddComponent<WorldObject>();
+                        wo.PrefabId = objData.prefab_id;
+                        wo.ApplyData(objData);
+                        successCount++;
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[WorldSnapshotApplier] Unknown primitive type: {typeStr}");
+                        failCount++;
+                    }
+                    continue;
+                }
+
                 var prefab = PrefabRegistryManager.GetPrefab(objData.prefab_id);
                 if (prefab == null)
                 {
+                    // glb: 等暂无法从本地恢复，仅记录
                     Debug.LogWarning($"[WorldSnapshotApplier] Prefab not found for id: {objData.prefab_id}, object_id: {objData.object_id}");
                     failCount++;
                     continue;
                 }
 
                 // 实例化 Prefab
-                var instance = Object.Instantiate(prefab, parent);
+                instance = UnityEngine.Object.Instantiate(prefab, parent);
                 instance.name = prefab.name; // 保持 Prefab 名称
 
                 // 应用 Transform 数据
                 instance.transform.position = objData.position;
                 instance.transform.rotation = objData.rotation;
                 instance.transform.localScale = objData.scale;
+
+                // 恢复后可移动、可留言（与放置时 EnsurePlaceableComponents 一致）
+                if (instance.GetComponent<PlaceableObjectMover>() == null) instance.AddComponent<PlaceableObjectMover>();
+                if (instance.GetComponent<InteractableObject>() == null) instance.AddComponent<InteractableObject>();
 
                 // 确保有 WorldObject 组件并应用数据
                 var worldObj = instance.GetComponent<WorldObject>();
@@ -101,7 +141,7 @@ namespace Morphis.WorldSnapshot
 
             foreach (var worldObj in worldObjects)
             {
-                Object.Destroy(worldObj.gameObject);
+                UnityEngine.Object.Destroy(worldObj.gameObject);
             }
 
             Debug.Log($"[WorldSnapshotApplier] Cleared {count} world objects");

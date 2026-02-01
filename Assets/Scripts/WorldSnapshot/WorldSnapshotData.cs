@@ -12,7 +12,10 @@ namespace Morphis.WorldSnapshot
     {
         public string object_id;
         public string prefab_id;
-        
+
+        /// <summary> 留言内容，与后端 schema 兼容，便于之后同步到数据库 </summary>
+        public string comment;
+
         [SerializeField]
         private float pos_x, pos_y, pos_z;
         [SerializeField]

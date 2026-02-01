@@ -1,11 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Morphis.ModelPlacement;
 
 namespace Morphis.WorldSnapshot
 {
     /// <summary>
-    /// 世界快照构建器：扫描场景中所有 WorldObject，构建 WorldSnapshot
+    /// 世界快照构建器：扫描场景中所有 WorldObject（以及可放置物体），构建 WorldSnapshot。
+    /// 与后端 WorldSnapshotPayload 结构一致，便于之后同步到数据库。
     /// </summary>
     public static class WorldSnapshotBuilder
     {
@@ -24,6 +26,9 @@ namespace Morphis.WorldSnapshot
                 snapshot.version = version;
             }
 
+            // 确保所有可放置物体都有 WorldObject（例如从模型库/热栏拖入但尚未带 WorldObject 的）
+            EnsureWorldObjectOnPlaceables();
+
             // 扫描所有场景中的 WorldObject
             var worldObjects = FindAllWorldObjects();
             
@@ -38,6 +43,51 @@ namespace Morphis.WorldSnapshot
             Debug.Log($"[WorldSnapshotBuilder] Built snapshot for world '{worldId}' with {snapshot.objects.Count} objects, version {snapshot.version}");
             
             return snapshot;
+        }
+
+        /// <summary>
+        /// 为所有带 PlaceableObjectMover 且无 WorldObject 的物体添加 WorldObject（prefab_id 用 glb:名称），以便被保存
+        /// </summary>
+        private static void EnsureWorldObjectOnPlaceables()
+        {
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var scene = SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded) continue;
+
+                var rootObjects = scene.GetRootGameObjects();
+                foreach (var rootObj in rootObjects)
+                {
+                    EnsureWorldObjectRecursive(rootObj.transform);
+                }
+            }
+        }
+
+        private static void EnsureWorldObjectRecursive(Transform parent)
+        {
+            var mover = parent.GetComponent<PlaceableObjectMover>();
+            if (mover != null)
+            {
+                var wo = parent.GetComponent<WorldObject>();
+                if (wo == null)
+                {
+                    wo = parent.gameObject.AddComponent<WorldObject>();
+                    wo.PrefabId = "glb:" + parent.gameObject.name;
+                }
+            }
+            for (int i = 0; i < parent.childCount; i++)
+                EnsureWorldObjectRecursive(parent.GetChild(i));
+        }
+
+        /// <summary>
+        /// 为可放置物体添加 WorldObject 并设置 prefab_id，供 ModelLibraryUI / HotBarManager 等在放置时调用
+        /// </summary>
+        public static void EnsureWorldObjectForSnapshot(GameObject go, string prefabId)
+        {
+            if (go == null || string.IsNullOrEmpty(prefabId)) return;
+            var wo = go.GetComponent<WorldObject>();
+            if (wo == null) wo = go.AddComponent<WorldObject>();
+            wo.PrefabId = prefabId;
         }
 
         /// <summary>

@@ -69,14 +69,22 @@ namespace Morphis.WorldSnapshot
             transform.position = data.position;
             transform.rotation = data.rotation;
             transform.localScale = data.scale;
+
+            // 恢复留言到 InteractableObject
+            if (!string.IsNullOrEmpty(data.comment))
+            {
+                var interactable = GetComponent<InteractableObject>();
+                if (interactable != null)
+                    interactable.SetComment(data.comment);
+            }
         }
 
         /// <summary>
-        /// 导出为 WorldObjectData
+        /// 导出为 WorldObjectData（含 InteractableObject 的 comment，便于与后端同步）
         /// </summary>
         public WorldObjectData ExportData()
         {
-            return new WorldObjectData(
+            var data = new WorldObjectData(
                 PrefabId,
                 transform.position,
                 transform.rotation,
@@ -85,6 +93,10 @@ namespace Morphis.WorldSnapshot
             {
                 object_id = ObjectId
             };
+            var interactable = GetComponent<InteractableObject>();
+            if (interactable != null && !string.IsNullOrEmpty(interactable.comment))
+                data.comment = interactable.comment;
+            return data;
         }
     }
 }

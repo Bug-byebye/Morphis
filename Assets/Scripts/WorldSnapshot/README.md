@@ -4,6 +4,8 @@
 
 世界快照系统用于将 Unity 场景中的"可放置物体"序列化为结构化数据，支持本地保存/加载（JSON）和通过 HTTP 与后端交互。
 
+**MainScene 场景保存**：进入 MainScene 时从本地自动加载世界；退出 Play 或应用暂停时自动保存。数据结构与后端 `POST/GET /world/{world_id}` 一致，便于之后同步到数据库。
+
 ## 核心特性
 
 - ✅ 只处理"静态世界数据"（不涉及 Player 状态、实时同步）
@@ -33,7 +35,7 @@ worldObj.PrefabId = "my_prefab_id"; // 必须与 PrefabRegistry 中的 ID 匹配
 
 ### 3. 使用 WorldSnapshotManager
 
-在场景中添加 `WorldSnapshotManager` 组件：
+MainScene 加载时 `WorldSnapshotBootstrap` 会自动创建 `WorldSnapshotManager`（若不存在）。也可在场景中手动添加 `WorldSnapshotManager` 组件。
 
 ```csharp
 // 保存到本地
@@ -58,7 +60,7 @@ WorldSnapshotManager.Instance.LoadWorldFromServer("my_world_id",
 ### WorldObjectData / WorldSnapshot
 
 数据结构：
-- `WorldObjectData`: 单个物体的数据（position, rotation, scale, prefab_id, object_id）
+- `WorldObjectData`: 单个物体的数据（position, rotation, scale, prefab_id, object_id, comment 留言）
 - `WorldSnapshot`: 世界快照（world_id, version, objects 列表）
 
 ### WorldObject
@@ -150,7 +152,8 @@ WorldSnapshotManager.Instance.LoadWorldFromLocal("my_world");
       "rot_w": 1.0,
       "scale_x": 1.0,
       "scale_y": 1.0,
-      "scale_z": 1.0
+      "scale_z": 1.0,
+      "comment": "可选，留言内容"
     }
   ]
 }

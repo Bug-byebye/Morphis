@@ -1,11 +1,12 @@
 using System;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Morphis.WorldSnapshot
 {
     /// <summary>
     /// 世界快照管理器：提供统一的 API 来保存/加载世界快照
-    /// 支持本地存储和服务器存储
+    /// 支持本地存储和服务器存储；与后端 POST/GET /world/{world_id} 结构一致，便于之后同步到数据库
     /// </summary>
     public class WorldSnapshotManager : MonoBehaviour
     {
@@ -15,11 +16,11 @@ namespace Morphis.WorldSnapshot
         [Tooltip("Prefab Registry（可选，也可以通过代码设置）")]
         [SerializeField] private PrefabRegistry prefabRegistry;
 
-        [Tooltip("默认世界 ID（如果未指定）")]
-        [SerializeField] private string defaultWorldId = "default_world";
+        [Tooltip("默认世界 ID，与 MainScene 场景保存一致")]
+        [SerializeField] private string defaultWorldId = "MainScene";
 
-        [Tooltip("是否在启动时自动加载世界")]
-        [SerializeField] private bool autoLoadOnStart = false;
+        [Tooltip("是否在进入 MainScene 时自动从本地加载世界")]
+        [SerializeField] private bool autoLoadOnStart = true;
 
         private HttpWorldService _httpService;
 
@@ -42,15 +43,51 @@ namespace Morphis.WorldSnapshot
 
             // 获取或创建 HttpWorldService
             _httpService = HttpWorldService.GetOrCreate();
+
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void OnDestroy()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
+        /// <summary> 进入 MainScene 时从本地加载世界；退出/暂停时保存 </summary>
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            if (scene.name != "MainScene" || !autoLoadOnStart || string.IsNullOrEmpty(defaultWorldId))
+                return;
+            if (!LocalWorldStorage.Exists(defaultWorldId))
+                return;
+            Debug.Log($"[WorldSnapshotManager] MainScene loaded, loading world: {defaultWorldId}");
+            LoadWorldFromLocal(defaultWorldId, onError: _ => { });
         }
 
         private void Start()
         {
-            if (autoLoadOnStart && !string.IsNullOrEmpty(defaultWorldId))
+            // 若当前已是 MainScene（直接 Play 主场景），也尝试加载
+            if (autoLoadOnStart && !string.IsNullOrEmpty(defaultWorldId)
+                && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "MainScene"
+                && LocalWorldStorage.Exists(defaultWorldId))
             {
                 Debug.Log($"[WorldSnapshotManager] Auto-loading world: {defaultWorldId}");
                 LoadWorld(defaultWorldId, useServer: false);
             }
+        }
+
+        private void OnApplicationQuit()
+        {
+            if (!string.IsNullOrEmpty(defaultWorldId))
+            {
+                SaveWorldLocal(defaultWorldId);
+                Debug.Log($"[WorldSnapshotManager] Saved world on quit: {defaultWorldId}");
+            }
+        }
+
+        private void OnApplicationPause(bool pause)
+        {
+            if (pause && !string.IsNullOrEmpty(defaultWorldId))
+                SaveWorldLocal(defaultWorldId);
         }
 
         /// <summary>

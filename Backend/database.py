@@ -43,10 +43,21 @@ def get_db():
         db.close()
 
 
+def check_connection():
+    """
+    尝试连接数据库；失败则抛错，用于启动时阻止静默启动。
+    """
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    print("[Database] Connection check OK")
+
+
 def init_db():
     """
-    初始化数据库（创建所有表）
+    初始化数据库：先校验连接，再创建所有表。连接失败则抛错，不静默启动。
     """
-    from models import world_snapshot  # 导入模型以注册到 Base.metadata
+    check_connection()
+    from models import user, world, world_snapshot  # 注册到 Base.metadata
     Base.metadata.create_all(bind=engine)
     print("[Database] Tables created successfully")

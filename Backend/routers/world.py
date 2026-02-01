@@ -9,6 +9,7 @@ from crud.world_snapshot import (
     get_world_snapshot,
     create_or_update_world_snapshot,
 )
+from crud.world import get_or_create_world
 from schemas.world_snapshot import (
     WorldSnapshotPayload,
     WorldSnapshotResponse,
@@ -42,9 +43,10 @@ async def create_or_update_world(
     创建或更新世界快照
     """
     try:
+        # 确保 World 行存在（满足 world_id 外键）
+        get_or_create_world(db=db, world_id=world_id, name=world_id, owner_user_id=None)
         # 将整个 payload 转换为字典作为 snapshot 存储
         snapshot_data = payload.model_dump()
-        
         # 调用 CRUD 操作
         result = create_or_update_world_snapshot(
             db=db,

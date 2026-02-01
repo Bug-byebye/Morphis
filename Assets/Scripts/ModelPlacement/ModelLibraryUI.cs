@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using GLTFast;
+using Morphis.WorldSnapshot;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -319,6 +320,7 @@ namespace Morphis.ModelPlacement
                 NormalizeScale(go, targetSize: 1.0f);
                 SnapToGround(go, targetBaseY);
                 EnsurePlaceableComponents(go);
+                EnsureWorldObjectForSnapshot(go, $"{resourcesPath}/{def.DisplayName}");
                 Debug.Log($"[ModelLibrary] Placed prefab: {def.DisplayName} at {worldPos}");
                 return true;
             }
@@ -339,6 +341,7 @@ namespace Morphis.ModelPlacement
                 NormalizeScale(go, targetSize: 1.0f);
                 SnapToGround(go, targetBaseY);
                 EnsurePlaceableComponents(go);
+                EnsureWorldObjectForSnapshot(go, $"primitive:{def.FallbackPrimitive}");
                 Debug.Log($"[ModelLibrary] Placed primitive: {def.DisplayName} at {worldPos}");
                 return true;
             }
@@ -374,6 +377,7 @@ namespace Morphis.ModelPlacement
             NormalizeScale(root, targetSize: 1.0f);
             SnapToGround(root, targetBaseY);
             EnsurePlaceableComponents(root);
+            EnsureWorldObjectForSnapshot(root, $"glb:{displayName}");
 
             Debug.Log($"[ModelLibrary] Placed GLB: {displayName} at {worldPos}");
         }
@@ -418,6 +422,12 @@ namespace Morphis.ModelPlacement
             // 可交互留言/高亮
             if (go.GetComponent<InteractableObject>() == null)
                 go.AddComponent<InteractableObject>();
+        }
+
+        /// <summary> 为场景保存/与后端同步：给可放置物体添加 WorldObject 并设置 prefab_id </summary>
+        private static void EnsureWorldObjectForSnapshot(GameObject go, string prefabId)
+        {
+            WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(go, prefabId);
         }
 
         private static void EnsureColliderFromRenderers(GameObject root)
