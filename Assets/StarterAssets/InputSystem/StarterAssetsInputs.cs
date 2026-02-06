@@ -17,10 +17,11 @@ namespace StarterAssets
 		public bool analogMovement;
 
 		[Header("Mouse Cursor Settings")]
-		public bool cursorLocked = false;
+		public bool cursorLocked = true;
 		public bool cursorInputForLook = true;
 
 #if ENABLE_INPUT_SYSTEM
+		// For Send Messages mode
 		public void OnMove(InputValue value)
 		{
 			MoveInput(value.Get<Vector2>());
@@ -42,6 +43,30 @@ namespace StarterAssets
 		public void OnSprint(InputValue value)
 		{
 			SprintInput(value.isPressed);
+		}
+
+		// For Invoke Unity Events mode (used by PlayerArmature prefab)
+		public void InputMove(InputAction.CallbackContext context)
+		{
+			MoveInput(context.ReadValue<Vector2>());
+		}
+
+		public void InputLook(InputAction.CallbackContext context)
+		{
+			if(cursorInputForLook)
+			{
+				LookInput(context.ReadValue<Vector2>());
+			}
+		}
+
+		public void InputJump(InputAction.CallbackContext context)
+		{
+			JumpInput(context.performed);
+		}
+
+		public void InputSprint(InputAction.CallbackContext context)
+		{
+			SprintInput(context.performed);
 		}
 #endif
 
@@ -68,23 +93,12 @@ namespace StarterAssets
 
 		private void OnApplicationFocus(bool hasFocus)
 		{
-			// Don't lock cursor if Boot UI canvas is active (login/workspace selection)
-			var bootCanvas = GameObject.Find("BootCanvas");
-			if (bootCanvas != null && bootCanvas.activeInHierarchy)
-			{
-				// Boot UI is showing, keep cursor unlocked
-				Cursor.lockState = CursorLockMode.None;
-				Cursor.visible = true;
-				return;
-			}
 			SetCursorState(cursorLocked);
 		}
 
 		private void SetCursorState(bool newState)
 		{
-			// Force unlock regardless of newState
-			Cursor.lockState = CursorLockMode.None;
-			Cursor.visible = true;
+			Cursor.lockState = newState ? CursorLockMode.Locked : CursorLockMode.None;
 		}
 	}
 	

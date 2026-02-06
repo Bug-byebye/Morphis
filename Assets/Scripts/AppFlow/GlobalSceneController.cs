@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
+using Mirror;
 
 namespace Morphis.AppFlow
 {
@@ -38,25 +39,58 @@ namespace Morphis.AppFlow
         public void ReturnToMainScene()
         {
             Scene currentScene = SceneManager.GetActiveScene();
-            
-            // FORCE "MainScene" to be safe
             string target = "MainScene";
 
-            // Don't reload if we are already there
-            if (currentScene.name == target) 
-            {
-                Debug.Log("[GlobalSceneController] Already in MainScene.");
-                return;
-            }
-
-            // Also don't exit from BootScene (Login)
+            // Don't exit from BootScene (Login)
             if (currentScene.name == "BootScene")
             {
                 return;
             }
 
+            // If already in MainScene, do nothing
+            if (currentScene.name == target)
+            {
+                Debug.Log("[GlobalSceneController] Already in MainScene.");
+                return;
+            }
+
             Debug.Log($"[GlobalSceneController] Returning to {target}...");
-            SceneManager.LoadScene(target);
+            
+            // If in a networked game, unload current scene additively and keep main scene
+            if (NetworkClient.isConnected)
+            {
+                // Just unload current additive scene, player stays in main scene
+                StartCoroutine(UnloadCurrentSceneAdditive(currentScene.name));
+            }
+            else
+            {
+                // Not networked, just load scene normally
+                SceneManager.LoadScene(target);
+            }
+        }
+
+        private System.Collections.IEnumerator UnloadCurrentSceneAdditive(string sceneName)
+        {
+            if (sceneName != "MainScene")
+            {
+                // First move player back to MainScene
+                Scene mainScene = SceneManager.GetSceneByName("MainScene");
+                if (mainScene.isLoaded && NetworkClient.localPlayer != null)
+                {
+                    SceneManager.MoveGameObjectToScene(NetworkClient.localPlayer.gameObject, mainScene);
+                    Debug.Log("[GlobalSceneController] Moved player back to MainScene");
+                }
+                
+                // Set MainScene as active
+                if (mainScene.isLoaded)
+                {
+                    SceneManager.SetActiveScene(mainScene);
+                }
+                
+                // Then unload the additive scene
+                Debug.Log($"[GlobalSceneController] Unloading additive scene: {sceneName}");
+                yield return SceneManager.UnloadSceneAsync(sceneName);
+            }
         }
     }
 }

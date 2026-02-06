@@ -256,18 +256,19 @@ namespace Morphis.WorldSnapshot
 
                 yield return req.SendWebRequest();
 
-                if (req.result != UnityWebRequest.Result.Success)
-                {
-                    var error = $"Network error: {req.error}";
-                    Debug.LogError($"[HttpWorldService] {error}");
-                    onError?.Invoke(error);
-                    yield break;
-                }
-
+                // Check for 404 first - this is a valid "world not found" response, not a network error
                 if (req.responseCode == 404)
                 {
                     var error = $"World '{worldId}' not found on server";
                     Debug.LogWarning($"[HttpWorldService] {error}");
+                    onError?.Invoke(error);
+                    yield break;
+                }
+
+                if (req.result != UnityWebRequest.Result.Success)
+                {
+                    var error = $"Network error: {req.error}";
+                    Debug.LogError($"[HttpWorldService] {error}");
                     onError?.Invoke(error);
                     yield break;
                 }

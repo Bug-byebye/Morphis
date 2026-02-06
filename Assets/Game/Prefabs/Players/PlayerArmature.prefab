@@ -1615,6 +1615,7 @@ GameObject:
   - component: {fileID: -7746344328202090955}
   - component: {fileID: 917017578172699096}
   - component: {fileID: -5501673001723119883}
+  - component: {fileID: -5054461942095858629}
   m_Layer: 8
   m_Name: PlayerArmature
   m_TagString: Player
@@ -1932,22 +1933,38 @@ MonoBehaviour:
   syncDirection: 0
   syncMode: 0
   syncInterval: 0
-  topClamp: 70
-  bottomClamp: -30
-  sensitivity: 1
-  moveSpeed: 2
-  sprintSpeed: 5.335
-  rotationSmoothTime: 0.12
-  speedChangeRate: 10
-  gravity: -15
-  jumpHeight: 1.2
-  jumpTimeout: 0.5
-  fallTimeout: 0.15
-  groundedOffset: -0.14
-  groundedRadius: 0.28
-  groundLayers:
+  _cameraTargetFallback: {fileID: 0}
+  _topClamp: 70
+  _bottomClamp: -30
+  _sensitivity: 1
+  _moveSpeed: 2
+  _sprintSpeed: 5.335
+  _rotationSmoothTime: 0.12
+  _speedChangeRate: 10
+  _gravity: -15
+  _jumpHeight: 1.2
+  _groundedOffset: -0.14
+  _groundedRadius: 0.28
+  _groundLayers:
     serializedVersion: 2
     m_Bits: 4294967295
+--- !u!114 &-5054461942095858629
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5414707384187330490}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1c58fc2e1b7f940fcb47219591c5b1d6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::StarterAssets.NetworkPlayerSetup
+  syncDirection: 0
+  syncMode: 0
+  syncInterval: 0
+  componentsToDisableForRemote: []
+  cinemachineFollowTarget: {fileID: 0}
 --- !u!1 &5626865731734266301
 GameObject:
   m_ObjectHideFlags: 0

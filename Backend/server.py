@@ -24,6 +24,7 @@ import secrets
 
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
+from services.dog_chat import ChatRequest, ChatResponse, chat_with_dog, clear_conversation
 
 # 导入世界快照路由和数据库初始化
 from routers import world
@@ -374,6 +375,48 @@ async def generate_legacy(request: Text23DRequest):
 
 
 # ========== 工具端点 ==========
+
+@app.post("/chat", response_model=ChatResponse)
+async def api_dog_chat(request: ChatRequest):
+    """
+    Dog companion chat endpoint.
+    
+    Request Body:
+        message: User's message
+        session_id: Optional session ID for conversation history
+        dog_name: Optional dog name (default: Buddy)
+    
+    Returns:
+        Dog's response
+    """
+    print(f"[DogChat] Message: {request.message[:50]}...")
+    
+    try:
+        response = chat_with_dog(
+            message=request.message,
+            session_id=request.session_id or "default",
+            dog_name=request.dog_name or "Buddy"
+        )
+        return ChatResponse(
+            response=response,
+            session_id=request.session_id or "default"
+        )
+    except Exception as e:
+        print(f"[DogChat] Error: {e}")
+        return ChatResponse(
+            response="*whimpers* Woof... something went wrong...",
+            session_id=request.session_id or "default"
+        )
+
+
+@app.post("/chat/clear")
+async def api_clear_chat(session_id: str = "default"):
+    """
+    Clear conversation history for a session.
+    """
+    clear_conversation(session_id)
+    return {"status": "ok", "message": "Conversation cleared"}
+
 
 @app.get("/health")
 async def health():

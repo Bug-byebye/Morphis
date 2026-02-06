@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.EventSystems;
+using Mirror;
 
 namespace Interactions
 {
@@ -120,11 +121,45 @@ namespace Interactions
                 Debug.LogError($"[SceneTransition] Error: Scene '{targetSceneName}' is NOT added to Build Settings.\n" +
                                "1. Go to File > Build Settings...\n" +
                                "2. Drag your scene asset into the 'Scenes In Build' list.");
-                // Try to load anyway, it might fail if not in build settings but worth a shot in Editor sometimes works if open
             }
 #endif
             
-            SceneManager.LoadScene(targetSceneName);
+            // If in a networked game, load scene additively to keep network connection
+            if (NetworkClient.isConnected)
+            {
+                StartCoroutine(LoadSceneAdditive(targetSceneName));
+            }
+            else
+            {
+                // Not networked, just load scene normally
+                SceneManager.LoadScene(targetSceneName);
+            }
+        }
+
+        private System.Collections.IEnumerator LoadSceneAdditive(string sceneName)
+        {
+            // Check if scene is already loaded
+            Scene targetScene = SceneManager.GetSceneByName(sceneName);
+            if (!targetScene.isLoaded)
+            {
+                Debug.Log($"[SceneTransition] Loading scene additively: {sceneName}");
+                yield return SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Additive);
+                targetScene = SceneManager.GetSceneByName(sceneName);
+            }
+            
+            // Set the new scene as active
+            if (targetScene.isLoaded)
+            {
+                SceneManager.SetActiveScene(targetScene);
+                Debug.Log($"[SceneTransition] Active scene set to: {sceneName}");
+                
+                // Move local player to the new scene
+                if (NetworkClient.localPlayer != null)
+                {
+                    SceneManager.MoveGameObjectToScene(NetworkClient.localPlayer.gameObject, targetScene);
+                    Debug.Log($"[SceneTransition] Moved local player to scene: {sceneName}");
+                }
+            }
         }
 
 #if UNITY_EDITOR
