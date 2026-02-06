@@ -1,12 +1,13 @@
 using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Morphis.AppFlow;
 
 namespace Morphis.WorldSnapshot
 {
     /// <summary>
     /// 世界快照管理器：提供统一的 API 来保存/加载世界快照
-    /// 支持本地存储和服务器存储；与后端 POST/GET /world/{world_id} 结构一致，便于之后同步到数据库
+    /// 空间选项与空间数据均从数据库（后端 GET/POST /world/{world_id}）读写；当前空间 ID 来自 AppSession.WorkspaceId
     /// </summary>
     public class WorldSnapshotManager : MonoBehaviour
     {
@@ -16,13 +17,15 @@ namespace Morphis.WorldSnapshot
         [Tooltip("Prefab Registry（可选，也可以通过代码设置）")]
         [SerializeField] private PrefabRegistry prefabRegistry;
 
-        [Tooltip("默认世界 ID，与 MainScene 场景保存一致")]
+        [Tooltip("默认世界 ID（未通过登录选空间时使用，如直接 Play MainScene）")]
         [SerializeField] private string defaultWorldId = "MainScene";
 
-        [Tooltip("是否在进入 MainScene 时自动从本地加载世界")]
+        [Tooltip("是否在进入 MainScene 时自动从服务器/本地加载世界")]
         [SerializeField] private bool autoLoadOnStart = true;
 
         private HttpWorldService _httpService;
+        /// <summary> 当前会话使用的世界 ID：来自 AppSession.WorkspaceId（选中的空间）或 defaultWorldId </summary>
+        private string _currentWorldId;
 
         private void Awake()
         {
@@ -35,16 +38,17 @@ namespace Morphis.WorldSnapshot
             Instance = this;
             DontDestroyOnLoad(gameObject);
 
-            // 设置 PrefabRegistry
             if (prefabRegistry != null)
-            {
                 PrefabRegistryManager.SetRegistry(prefabRegistry);
-            }
 
-            // 获取或创建 HttpWorldService
             _httpService = HttpWorldService.GetOrCreate();
-
             SceneManager.sceneLoaded += OnSceneLoaded;
+
+            // 若本对象是在 MainScene 的 sceneLoaded 回调里创建的，本次不会收到 sceneLoaded，
+            // 必须在这里用 AppSession.WorkspaceId 设置 _currentWorldId，否则会一直用 defaultWorldId（MainScene）
+            var active = SceneManager.GetActiveScene();
+            if (active.name == "MainScene")
+                _currentWorldId = !string.IsNullOrEmpty(AppSession.WorkspaceId) ? AppSession.WorkspaceId : defaultWorldId;
         }
 
         private void OnDestroy()
@@ -52,42 +56,82 @@ namespace Morphis.WorldSnapshot
             SceneManager.sceneLoaded -= OnSceneLoaded;
         }
 
-        /// <summary> 进入 MainScene 时从本地加载世界；退出/暂停时保存 </summary>
+        private string GetCurrentWorldId()
+        {
+            return !string.IsNullOrEmpty(_currentWorldId) ? _currentWorldId : defaultWorldId;
+        }
+
+        /// <summary> 进入 MainScene 时：使用 AppSession.WorkspaceId 作为世界 ID，优先从服务器加载，404 则空场景 </summary>
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (scene.name != "MainScene" || !autoLoadOnStart || string.IsNullOrEmpty(defaultWorldId))
+            if (scene.name != "MainScene" || !autoLoadOnStart)
                 return;
-            if (!LocalWorldStorage.Exists(defaultWorldId))
+
+            _currentWorldId = !string.IsNullOrEmpty(AppSession.WorkspaceId) ? AppSession.WorkspaceId : defaultWorldId;
+            if (string.IsNullOrEmpty(_currentWorldId))
                 return;
-            Debug.Log($"[WorldSnapshotManager] MainScene loaded, loading world: {defaultWorldId}");
-            LoadWorldFromLocal(defaultWorldId, onError: _ => { });
+
+            // 已登录且为真实空间 ID 时，仅从数据库（服务器）加载，不使用本地
+            if (AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId))
+            {
+                Debug.Log($"[WorldSnapshotManager] MainScene loaded, loading world from server only: {_currentWorldId}");
+                LoadWorldFromServer(_currentWorldId,
+                    onSuccess: () => { },
+                    onError: err =>
+                    {
+                        if (err != null && (err.Contains("404") || err.Contains("not found")))
+                            Debug.Log($"[WorldSnapshotManager] World '{_currentWorldId}' not on server (new space), starting empty.");
+                        else
+                            Debug.LogWarning($"[WorldSnapshotManager] Failed to load from server: {err}. Scene remains empty.");
+                    });
+                return;
+            }
+
+            // 未登录（如直接 Play MainScene）时从本地加载
+            if (LocalWorldStorage.Exists(_currentWorldId))
+            {
+                Debug.Log($"[WorldSnapshotManager] MainScene loaded (no login), loading from local: {_currentWorldId}");
+                LoadWorldFromLocal(_currentWorldId, onError: _ => { });
+            }
         }
 
         private void Start()
         {
-            // 若当前已是 MainScene（直接 Play 主场景），也尝试加载
-            if (autoLoadOnStart && !string.IsNullOrEmpty(defaultWorldId)
-                && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "MainScene"
-                && LocalWorldStorage.Exists(defaultWorldId))
+            if (!autoLoadOnStart || UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "MainScene")
+                return;
+            // 若 Awake 时未设置（非 MainScene 加载路径），这里用 AppSession.WorkspaceId 补上，避免误用 defaultWorldId
+            if (string.IsNullOrEmpty(_currentWorldId))
+                _currentWorldId = !string.IsNullOrEmpty(AppSession.WorkspaceId) ? AppSession.WorkspaceId : defaultWorldId;
+            if (string.IsNullOrEmpty(GetCurrentWorldId()))
+                return;
+            if (AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId))
             {
-                Debug.Log($"[WorldSnapshotManager] Auto-loading world: {defaultWorldId}");
-                LoadWorld(defaultWorldId, useServer: false);
+                LoadWorldFromServer(_currentWorldId, () => { }, _ => { });
+                return;
             }
+            if (LocalWorldStorage.Exists(_currentWorldId))
+                LoadWorld(_currentWorldId, useServer: false);
         }
 
         private void OnApplicationQuit()
         {
-            if (!string.IsNullOrEmpty(defaultWorldId))
+            var worldId = GetCurrentWorldId();
+            if (string.IsNullOrEmpty(worldId)) return;
+            // 仅保存到数据库：已登录时只写服务器，不写本地；未登录不持久化
+            if (AppSession.IsLoggedIn)
             {
-                SaveWorldLocal(defaultWorldId);
-                Debug.Log($"[WorldSnapshotManager] Saved world on quit: {defaultWorldId}");
+                SaveWorldServer(worldId, onError: e => Debug.LogWarning($"[WorldSnapshotManager] Save to server on quit failed: {e}"));
+                Debug.Log($"[WorldSnapshotManager] Saved world to server on quit: {worldId}");
             }
         }
 
         private void OnApplicationPause(bool pause)
         {
-            if (pause && !string.IsNullOrEmpty(defaultWorldId))
-                SaveWorldLocal(defaultWorldId);
+            if (!pause) return;
+            var worldId = GetCurrentWorldId();
+            if (string.IsNullOrEmpty(worldId)) return;
+            if (AppSession.IsLoggedIn)
+                SaveWorldServer(worldId, onError: _ => { });
         }
 
         /// <summary>
@@ -95,7 +139,7 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public bool SaveWorldLocal(string worldId = null)
         {
-            worldId = worldId ?? defaultWorldId;
+            worldId = worldId ?? GetCurrentWorldId();
             var snapshot = WorldSnapshotBuilder.BuildSnapshot(worldId);
             return LocalWorldStorage.SaveToLocal(snapshot);
         }
@@ -105,7 +149,8 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public void SaveWorldServer(string worldId = null, Action onSuccess = null, Action<string> onError = null)
         {
-            worldId = worldId ?? defaultWorldId;
+            worldId = worldId ?? GetCurrentWorldId();
+            Debug.Log($"[WorldSnapshotManager] SaveWorldServer: world_id={worldId}");
             var snapshot = WorldSnapshotBuilder.BuildSnapshot(worldId);
             _httpService.SaveToServer(snapshot, onSuccess, onError);
         }
@@ -119,7 +164,7 @@ namespace Morphis.WorldSnapshot
         /// <param name="onError">失败回调</param>
         public void LoadWorld(string worldId = null, bool useServer = false, Action onSuccess = null, Action<string> onError = null)
         {
-            worldId = worldId ?? defaultWorldId;
+            worldId = worldId ?? GetCurrentWorldId();
 
             if (useServer)
             {
@@ -136,7 +181,7 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public void LoadWorldFromLocal(string worldId = null, Action onSuccess = null, Action<string> onError = null)
         {
-            worldId = worldId ?? defaultWorldId;
+            worldId = worldId ?? GetCurrentWorldId();
             var snapshot = LocalWorldStorage.LoadFromLocal(worldId);
 
             if (snapshot == null)
@@ -156,7 +201,7 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public void LoadWorldFromServer(string worldId = null, Action onSuccess = null, Action<string> onError = null)
         {
-            worldId = worldId ?? defaultWorldId;
+            worldId = worldId ?? GetCurrentWorldId();
             _httpService.LoadFromServer(worldId,
                 snapshot =>
                 {
@@ -189,7 +234,7 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public WorldSnapshot BuildSnapshot(string worldId = null)
         {
-            worldId = worldId ?? defaultWorldId;
+            worldId = worldId ?? GetCurrentWorldId();
             return WorldSnapshotBuilder.BuildSnapshot(worldId);
         }
 

@@ -821,15 +821,13 @@ namespace Morphis.AppFlow
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
-                    SetStatus($"Workspaces failed: {req.error} (showing fake UI)");
-                    BuildFakeWorkspaceList();
+                    SetStatus($"Workspaces failed: {req.error}. Check network and backend.");
                     yield break;
                 }
 
                 if (req.responseCode >= 400)
                 {
-                    SetStatus($"Workspaces failed ({req.responseCode}): {req.downloadHandler.text} (showing fake UI)");
-                    BuildFakeWorkspaceList();
+                    SetStatus($"Workspaces failed ({req.responseCode}): {req.downloadHandler.text}");
                     yield break;
                 }
 
@@ -1018,7 +1016,7 @@ namespace Morphis.AppFlow
             }
             catch
             {
-                BuildFakeWorkspaceList();
+                SetStatus("Failed to parse workspaces from server.");
             }
         }
 

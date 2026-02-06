@@ -1,7 +1,8 @@
 """
 世界快照 API 路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 from database import get_db
@@ -69,10 +70,9 @@ async def create_or_update_world(
 
 @router.get(
     "/{world_id}",
-    response_model=WorldSnapshotResponse,
     status_code=status.HTTP_200_OK,
     summary="获取世界快照",
-    description="根据 world_id 获取最新版本的世界快照"
+    description="根据 world_id 获取最新版本的世界快照。返回体为 Unity 可直接解析的 { world_id, version, objects } 结构。"
 )
 async def get_world(
     world_id: str,
@@ -81,21 +81,18 @@ async def get_world(
     """
     GET /world/{world_id}
     
-    获取世界快照
+    获取世界快照。返回存储的 snapshot 内容（与 Unity WorldSnapshot 结构一致）。
     """
-    snapshot = get_world_snapshot(db=db, world_id=world_id)
+    row = get_world_snapshot(db=db, world_id=world_id)
     
-    if not snapshot:
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"World '{world_id}' not found"
         )
-    
-    return WorldSnapshotResponse(
-        world_id=snapshot.world_id,
-        version=snapshot.version,
-        snapshot=snapshot.snapshot,
-        owner_id=snapshot.owner_id,
-        created_at=snapshot.created_at,
-        updated_at=snapshot.updated_at
-    )
+    # 返回与 Unity 一致的顶层结构：world_id, version, objects
+    body = dict(row.snapshot) if isinstance(row.snapshot, dict) else {}
+    body.setdefault("world_id", row.world_id)
+    body.setdefault("version", row.version)
+    body.setdefault("objects", [])
+    return Response(content=json.dumps(body), media_type="application/json")
