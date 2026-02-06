@@ -34,6 +34,8 @@ namespace Morphis.WorldSnapshot
                 return;
             var go = new GameObject("WorldSnapshotManager(Auto)");
             go.AddComponent<WorldSnapshotManager>();
+            if (go.GetComponent<WorldSaveButton>() == null)
+                go.AddComponent<WorldSaveButton>();
         }
     }
 }
