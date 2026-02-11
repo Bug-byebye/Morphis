@@ -77,9 +77,9 @@ public class AIGeneratorPipeline : MonoBehaviour
         }
         else
         {
-            // 隐藏 UI，恢复鼠标状态
-            Cursor.lockState = originalLockMode;
-            Cursor.visible = originalCursorVisible;
+            // Keep cursor unlocked and visible
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
         }
         
         if (uiPanel != null)

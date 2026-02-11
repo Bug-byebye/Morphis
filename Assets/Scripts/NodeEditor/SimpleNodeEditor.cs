@@ -34,11 +34,18 @@ namespace AIPipeline.UI
         private List<ConnectionLine> connections = new List<ConnectionLine>();
         
         private bool isVisible = false;
+        /// <summary>Whether the workflow station editor is currently open (blocks world clicks).</summary>
+        public static bool IsEditorOpen => Instance != null && Instance.isVisible;
         private CursorLockMode savedLockMode;
         private bool savedCursorVisible;
-        private PlayerInput playerInput;
         private Canvas mainCanvas;
         private Vector2 lastClickPos;
+
+        /// <summary>Always find the current PlayerInput fresh — never cache across scenes.</summary>
+        private PlayerInput FindPlayerInput()
+        {
+            return FindObjectOfType<PlayerInput>();
+        }
 
         [Header("Main UI")]
         [SerializeField] private GameObject mainUICanvas;
@@ -82,8 +89,6 @@ namespace AIPipeline.UI
 
             if (this == null) yield break;
 
-            playerInput = FindObjectOfType<PlayerInput>();
-            
             // Re-check canvases if we are persisting
             if (mainCanvas == null) CreateEditorUI();
             if (mainUICanvas == null) CreateMainUI();
@@ -92,7 +97,7 @@ namespace AIPipeline.UI
                 editorRoot.SetActive(false);
             
             // Ensure player input is enabled at start
-            if (playerInput != null) playerInput.enabled = true;
+            SetAllPlayerInputEnabled(true);
             
             Debug.Log("[SimpleNodeEditor] Ready! Press Tab or Button to open.");
         }
@@ -250,15 +255,15 @@ namespace AIPipeline.UI
                 savedCursorVisible = Cursor.visible;
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
-                if (playerInput != null) playerInput.enabled = false;
+                SetAllPlayerInputEnabled(false);
                 
                 if (workflowStationButtonText != null) workflowStationButtonText.text = "Close Workflow";
             }
             else
             {
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
-                if (playerInput != null) playerInput.enabled = true;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                SetAllPlayerInputEnabled(true);
                 if (contextMenu != null) contextMenu.SetActive(false);
                 
                 if (workflowStationButtonText != null) workflowStationButtonText.text = "Workflow Station";
@@ -285,12 +290,57 @@ namespace AIPipeline.UI
             }
             else
             {
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
-                Debug.Log("[NodeEditor] Mouse cursor disabled. Press M to enable.");
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                Debug.Log("[NodeEditor] Mouse cursor mode toggled off (cursor stays visible).");
             }
         }
         
+        /// <summary>
+        /// Enable or disable ALL PlayerInput components in the scene.
+        /// Uses a fresh search every time — never stale references.
+        /// </summary>
+        private void SetAllPlayerInputEnabled(bool enabled)
+        {
+            var allInputs = FindObjectsByType<PlayerInput>(FindObjectsSortMode.None);
+            foreach (var pi in allInputs)
+            {
+                if (pi != null) pi.enabled = enabled;
+            }
+        }
+
+        /// <summary>
+        /// Safety net: if the editor is NOT visible, ensure all player movement components are enabled.
+        /// Prevents getting stuck with disabled input due to stale references or errors.
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!isVisible)
+            {
+                // Find the local player's PlayerInput and ensure ALL movement components are enabled
+                var pi = FindPlayerInput();
+                if (pi == null) return;
+
+                bool anyFixed = false;
+
+                if (!pi.enabled) { pi.enabled = true; anyFixed = true; }
+
+                var inputs = pi.GetComponent<StarterAssets.StarterAssetsInputs>();
+                if (inputs != null && !inputs.enabled) { inputs.enabled = true; anyFixed = true; }
+
+                var tpc = pi.GetComponent<StarterAssets.ThirdPersonController>();
+                if (tpc != null && !tpc.enabled) { tpc.enabled = true; anyFixed = true; }
+
+                var cc = pi.GetComponent<CharacterController>();
+                if (cc != null && !cc.enabled) { cc.enabled = true; anyFixed = true; }
+
+                if (anyFixed)
+                {
+                    Debug.LogWarning("[SimpleNodeEditor] Safety: Re-enabled movement components that were stuck disabled.");
+                }
+            }
+        }
+
         private void CreateEditorUI()
         {
             // 主 Canvas
@@ -366,12 +416,8 @@ namespace AIPipeline.UI
             toolbarRect.anchorMin = new Vector2(0, 0);
             toolbarRect.anchorMax = new Vector2(1, 0);
             toolbarRect.pivot = new Vector2(0.5f, 0);
-            // 使用屏幕高度的百分比作为工具栏高度（约 5%）
-            toolbarRect.sizeDelta = new Vector2(0, 0);
+            toolbarRect.sizeDelta = new Vector2(0, 70);
             toolbarRect.anchoredPosition = Vector2.zero;
-            // 设置高度为屏幕的 6%
-            var toolbarFitter = toolbar.AddComponent<ContentSizeFitter>();
-            toolbarFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             
             Image tbBg = toolbar.AddComponent<Image>();
             tbBg.color = new Color(0.15f, 0.15f, 0.2f, 1f);

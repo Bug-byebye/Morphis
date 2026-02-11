@@ -124,29 +124,29 @@ namespace Morphis.Companion
             message = message.ToLower();
             
             if (message.Contains("hello") || message.Contains("hi"))
-                return $"*wags tail excitedly* Woof! Hello friend! I'm {dogName}! 🐕";
+                return $"*wags tail excitedly* Woof! Hello friend! I'm {dogName}!";
             if (message.Contains("good") && message.Contains("boy"))
-                return "*spins in circles* Woof woof! Thank you! ❤️";
+                return "*spins in circles* Woof woof! Thank you! <3";
             if (message.Contains("treat") || message.Contains("food"))
-                return "*ears perk up* Did someone say treats?! 🦴";
+                return "*ears perk up* Did someone say treats?!";
             if (message.Contains("walk"))
-                return "*runs to the door* Walk?! WALK?! Let's go! 🐕";
+                return "*runs to the door* Walk?! WALK?! Let's go!";
             if (message.Contains("love"))
-                return "*licks your face* I love you too, human! ❤️";
+                return "*licks your face* I love you too, human! <3";
             if (message.Contains("sit"))
                 return "*sits down proudly* Look at me! I'm a good boy!";
             if (message.Contains("play"))
-                return "*brings a ball* Throw it! Throw it! 🎾";
+                return "*brings a ball* Throw it! Throw it!";
             if (message.Contains("name"))
-                return $"*tail wagging* My name is {dogName}! Nice to meet you! 🐕";
+                return $"*tail wagging* My name is {dogName}! Nice to meet you!";
             
             string[] defaultResponses = new string[]
             {
                 "*wags tail* Woof! *tilts head curiously*",
-                "*happy panting* Bark bark! 🐕",
+                "*happy panting* Bark bark!",
                 "*sniffs around* Interesting... tell me more!",
-                "*rolls over* Belly rubs? 🐕",
-                "*playful bark* Woof woof! ❤️"
+                "*rolls over* Belly rubs?",
+                "*playful bark* Woof woof! <3"
             };
             
             return defaultResponses[UnityEngine.Random.Range(0, defaultResponses.Length)];

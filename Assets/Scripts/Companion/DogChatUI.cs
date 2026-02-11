@@ -179,7 +179,7 @@ namespace Morphis.Companion
             var headerImage = header.AddComponent<Image>();
             headerImage.color = new Color(0.15f, 0.15f, 0.2f);
 
-            var titleText = CreateTextChild(header, "Title", $"Chat with {dogName} 🐕");
+            var titleText = CreateTextChild(header, "Title", $"Chat with {dogName}");
             titleText.alignment = TextAlignmentOptions.Center;
             titleText.fontSize = 24;
             var titleRect = titleText.GetComponent<RectTransform>();
@@ -281,12 +281,12 @@ namespace Morphis.Companion
             sendBtnImage.color = new Color(0.2f, 0.7f, 0.4f);
             sendButton = sendBtnObj.AddComponent<Button>();
             sendButton.onClick.AddListener(SendMessage);
-            var sendText = CreateTextChild(sendBtnObj, "Text", "➤");
+            var sendText = CreateTextChild(sendBtnObj, "Text", ">");
             sendText.alignment = TextAlignmentOptions.Center;
             sendText.fontSize = 22;
 
             // Add welcome message
-            AddMessage(dogName, $"*wags tail* Woof! Hi there! I'm {dogName}! 🐕", dogMessageColor);
+            AddMessage(dogName, $"*wags tail* Woof! Hi there! I'm {dogName}!", dogMessageColor);
         }
 
         private GameObject CreateChild(GameObject parent, string name, Vector2 anchorMin, Vector2 anchorMax, 

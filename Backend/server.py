@@ -389,16 +389,31 @@ async def api_dog_chat(request: ChatRequest):
     Returns:
         Dog's response
     """
+    import asyncio
     print(f"[DogChat] Message: {request.message[:50]}...")
     
     try:
-        response = chat_with_dog(
-            message=request.message,
-            session_id=request.session_id or "default",
-            dog_name=request.dog_name or "Buddy"
+        # Run blocking LLM call in a thread pool to avoid freezing the event loop
+        loop = asyncio.get_event_loop()
+        response = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                chat_with_dog,
+                request.message,
+                request.session_id or "default",
+                request.dog_name or "Buddy"
+            ),
+            timeout=20.0  # 20 second overall timeout
         )
+        print(f"[DogChat] Response: {response[:50]}...")
         return ChatResponse(
             response=response,
+            session_id=request.session_id or "default"
+        )
+    except asyncio.TimeoutError:
+        print("[DogChat] Error: LLM request timed out")
+        return ChatResponse(
+            response="*yawns* Woof... I got distracted by a squirrel! Can you say that again?",
             session_id=request.session_id or "default"
         )
     except Exception as e:

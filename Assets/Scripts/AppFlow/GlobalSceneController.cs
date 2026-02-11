@@ -77,7 +77,12 @@ namespace Morphis.AppFlow
                 Scene mainScene = SceneManager.GetSceneByName("MainScene");
                 if (mainScene.isLoaded && NetworkClient.localPlayer != null)
                 {
-                    SceneManager.MoveGameObjectToScene(NetworkClient.localPlayer.gameObject, mainScene);
+                    GameObject player = NetworkClient.localPlayer.gameObject;
+                    SceneManager.MoveGameObjectToScene(player, mainScene);
+
+                    // Teleport player to spawn point in MainScene
+                    TeleportToSpawnPoint(player, mainScene);
+
                     Debug.Log("[GlobalSceneController] Moved player back to MainScene");
                 }
                 
@@ -91,6 +96,47 @@ namespace Morphis.AppFlow
                 Debug.Log($"[GlobalSceneController] Unloading additive scene: {sceneName}");
                 yield return SceneManager.UnloadSceneAsync(sceneName);
             }
+        }
+
+        /// <summary>
+        /// Teleports the player to a SpawnPoint in the given scene.
+        /// Falls back to Vector3.zero if no spawn point is found.
+        /// </summary>
+        private void TeleportToSpawnPoint(GameObject player, Scene scene)
+        {
+            Vector3 targetPos = Vector3.zero;
+            Quaternion targetRot = Quaternion.identity;
+            bool found = false;
+
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.name == "SpawnPoint")
+                {
+                    targetPos = root.transform.position;
+                    targetRot = root.transform.rotation;
+                    found = true;
+                    break;
+                }
+                Transform sp = root.transform.Find("SpawnPoint");
+                if (sp != null)
+                {
+                    targetPos = sp.position;
+                    targetRot = sp.rotation;
+                    found = true;
+                    break;
+                }
+            }
+
+            var cc = player.GetComponent<CharacterController>();
+            bool ccWasEnabled = cc != null && cc.enabled;
+            if (cc != null) cc.enabled = false;
+
+            player.transform.position = targetPos;
+            player.transform.rotation = targetRot;
+
+            if (cc != null) cc.enabled = ccWasEnabled;
+
+            Debug.Log($"[GlobalSceneController] Teleported player to {(found ? "SpawnPoint" : "default position")} at {targetPos}");
         }
     }
 }

@@ -15,8 +15,8 @@ namespace Morphis.Companion
         [SerializeField] private Transform target;
 
         [Header("Position Offset")]
-        [Tooltip("How far behind the player the dog should stay (negative = behind)")]
-        [SerializeField] private float forwardOffset = -3f;
+        [Tooltip("How far behind the player the dog should stay (positive = behind)")]
+        [SerializeField] private float forwardOffset = 3f;
         [Tooltip("Side offset (positive = right, negative = left)")]
         [SerializeField] private float sideOffset = 0.5f;
 
@@ -30,8 +30,8 @@ namespace Morphis.Companion
 
         [Header("Animation IDs (from Dog Animator Controller)")]
         [SerializeField] private int idleAnimId = 0;
-        [SerializeField] private int walkAnimId = 1;
-        [SerializeField] private int runAnimId = 3;
+        [SerializeField] private int walkAnimId = 2;
+        [SerializeField] private int runAnimId = 4;
 
         [Header("Chat")]
         [SerializeField] private string dogName = "Buddy";
@@ -39,6 +39,7 @@ namespace Morphis.Companion
         private NavMeshAgent _agent;
         private Animator _animator;
         private Vector3 _lastTargetPosition;
+        private Vector3 _smoothedMoveDirection;
         private DogChatUI _chatUI;
 
         private void Awake()
@@ -65,24 +66,38 @@ namespace Morphis.Companion
             EnsureCollider();
 
             // Prevent dog from pushing the player
-            _agent.obstacleAvoidanceType = UnityEngine.AI.ObstacleAvoidanceType.NoObstacleAvoidance;
+            _agent.obstacleAvoidanceType = ObstacleAvoidanceType.NoObstacleAvoidance;
+
+            // Ignore collisions between dog and player layers at the physics level
+            var rb = GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = true;
+            }
         }
 
         private void EnsureCollider()
         {
-            if (GetComponent<Collider>() == null)
+            var col = GetComponent<Collider>();
+            if (col == null)
             {
                 // Try to find collider in children
-                var childCollider = GetComponentInChildren<Collider>();
-                if (childCollider == null)
-                {
-                    // Add capsule collider if none exists
-                    var capsule = gameObject.AddComponent<CapsuleCollider>();
-                    capsule.center = new Vector3(0, 0.5f, 0);
-                    capsule.radius = 0.5f;
-                    capsule.height = 1f;
-                    Debug.Log("[DogCompanion] Added CapsuleCollider for click detection");
-                }
+                col = GetComponentInChildren<Collider>();
+            }
+            if (col == null)
+            {
+                // Add capsule collider if none exists
+                var capsule = gameObject.AddComponent<CapsuleCollider>();
+                capsule.center = new Vector3(0, 0.5f, 0);
+                capsule.radius = 0.5f;
+                capsule.height = 1f;
+                capsule.isTrigger = true;
+                Debug.Log("[DogCompanion] Added trigger CapsuleCollider for click detection");
+            }
+            else
+            {
+                // Make existing collider a trigger so the dog can't push the player
+                col.isTrigger = true;
             }
         }
 
@@ -91,6 +106,9 @@ namespace Morphis.Companion
         /// </summary>
         private void OnMouseDown()
         {
+            // Block clicks when the workflow station editor is open
+            if (AIPipeline.UI.SimpleNodeEditor.IsEditorOpen) return;
+
             if (_chatUI != null)
             {
                 _chatUI.Toggle();
@@ -107,6 +125,7 @@ namespace Morphis.Companion
             if (target != null)
             {
                 _lastTargetPosition = target.position;
+                _smoothedMoveDirection = target.forward;
                 EnsureOnNavMesh();
             }
         }
@@ -213,6 +232,7 @@ namespace Morphis.Companion
                 
                 // Player just found - initialize
                 _lastTargetPosition = target.position;
+                _smoothedMoveDirection = target.forward;
                 EnsureOnNavMesh();
             }
 
@@ -245,11 +265,29 @@ namespace Morphis.Companion
 
         private Vector3 CalculateTargetPosition()
         {
-            // Position ahead of player in their forward direction
-            Vector3 forward = target.forward;
-            Vector3 right = target.right;
+            // Use the player's actual movement direction to determine "behind"
+            Vector3 moveDelta = target.position - _lastTargetPosition;
+            moveDelta.y = 0f; // ignore vertical movement
 
-            Vector3 offset = forward * forwardOffset + right * sideOffset;
+            // If the player is moving, smoothly update the movement direction
+            if (moveDelta.sqrMagnitude > 0.0001f)
+            {
+                _smoothedMoveDirection = Vector3.Lerp(
+                    _smoothedMoveDirection,
+                    moveDelta.normalized,
+                    Time.deltaTime * 5f
+                );
+            }
+
+            // Use movement direction when available, otherwise fall back to player's facing
+            Vector3 forward = _smoothedMoveDirection.sqrMagnitude > 0.01f
+                ? _smoothedMoveDirection.normalized
+                : target.forward;
+
+            Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+
+            // forwardOffset is positive; negate forward to place the dog *behind* the direction of travel
+            Vector3 offset = -forward * forwardOffset + right * sideOffset;
             Vector3 targetPos = target.position + offset;
 
             // Sample position on NavMesh

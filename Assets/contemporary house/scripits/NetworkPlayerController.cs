@@ -2,9 +2,7 @@ using UnityEngine;
 using Mirror;
 
 /// <summary>
-/// 联机时：本地玩家启用控制，远程禁用。
-/// 1）若存在 ThirdPersonController + StarterAssetsInputs：启用它们并让场景 Cinemachine 跟随本玩家的 CinemachineCameraTarget（与 demo 一致）。
-/// 2）若不存在：使用备用逻辑，用旧 Input 实现与 demo 相同行为——鼠标控制视角、前后左右以视角为准。详见 DemoControlAnalysis.md。
+/// 修复版NetworkPlayerController - 解决切换场景后无法移动的问题
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class NetworkPlayerController : NetworkBehaviour
@@ -14,7 +12,6 @@ public class NetworkPlayerController : NetworkBehaviour
     private Transform _cinemachineTarget;
 
     [Header("备用控制（无 ThirdPersonController 时）")]
-    [Tooltip("相机目标（玩家子物体），用于鼠标控制视角；不填则尝试查找子物体 CinemachineCameraTarget")]
     [SerializeField] private Transform _cameraTargetFallback;
     [SerializeField] private float _topClamp = 70f;
     [SerializeField] private float _bottomClamp = -30f;
@@ -39,6 +36,7 @@ public class NetworkPlayerController : NetworkBehaviour
     private const float TerminalVelocity = 53f;
     private const float Threshold = 0.01f;
     private bool _useFallback;
+    private bool _isInitialized = false;
 
     public static Camera LocalPlayerCamera { get; private set; }
 
@@ -52,6 +50,9 @@ public class NetworkPlayerController : NetworkBehaviour
         _inputs = inputsType != null ? (GetComponent(inputsType) as MonoBehaviour) : null;
 
         _useFallback = _thirdPersonController == null || _inputs == null;
+        
+        Debug.Log($"[NetworkPlayerController] Awake - ThirdPersonController: {(_thirdPersonController != null ? "Found" : "Not Found")}, UsesFallback: {_useFallback}");
+        
         if (_useFallback)
         {
             if (_cameraTargetFallback == null)
@@ -67,18 +68,43 @@ public class NetworkPlayerController : NetworkBehaviour
         }
         else
         {
+            // 先禁用，等OnStartLocalPlayer时再启用
             if (_thirdPersonController != null) _thirdPersonController.enabled = false;
             if (_inputs != null) _inputs.enabled = false;
+        }
+    }
+
+    private void Start()
+    {
+        // 单机模式 - 直接激活控制器
+        if (!NetworkClient.active && !NetworkServer.active)
+        {
+            Debug.Log("[NetworkPlayerController] 单机模式 - 激活控制器");
+            ActivateControllers();
         }
     }
 
     public override void OnStartLocalPlayer()
     {
         base.OnStartLocalPlayer();
+        Debug.Log("[NetworkPlayerController] OnStartLocalPlayer called");
+        ActivateControllers();
+    }
+
+    private void ActivateControllers()
+    {
+        if (_isInitialized)
+        {
+            Debug.Log("[NetworkPlayerController] Already initialized, skipping");
+            return;
+        }
+
+        _isInitialized = true;
 
         Transform followTarget = null;
         if (_useFallback)
         {
+            Debug.Log("[NetworkPlayerController] Using fallback controls");
             followTarget = _cameraTargetFallback;
             _cinemachineTargetYaw = transform.eulerAngles.y;
             _targetRotation = _cinemachineTargetYaw;
@@ -86,23 +112,39 @@ public class NetworkPlayerController : NetworkBehaviour
         }
         else
         {
+            Debug.Log("[NetworkPlayerController] Using ThirdPersonController");
             _cinemachineTarget = GetCinemachineCameraTarget(_thirdPersonController);
             followTarget = _cinemachineTarget;
-            if (_thirdPersonController != null) _thirdPersonController.enabled = true;
-            if (_inputs != null) _inputs.enabled = true;
+            
+            // 启用ThirdPersonController和StarterAssetsInputs
+            if (_thirdPersonController != null)
+            {
+                _thirdPersonController.enabled = true;
+                Debug.Log("[NetworkPlayerController] ThirdPersonController enabled");
+            }
+            if (_inputs != null)
+            {
+                _inputs.enabled = true;
+                Debug.Log("[NetworkPlayerController] StarterAssetsInputs enabled");
+            }
         }
 
         if (followTarget != null)
             SetSceneVCamFollow(followTarget);
 
         LocalPlayerCamera = Camera.main;
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        
+        // 保持鼠标可见
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        
+        Debug.Log("[NetworkPlayerController] Local player activated successfully");
     }
 
     public override void OnStopLocalPlayer()
     {
         base.OnStopLocalPlayer();
+        Debug.Log("[NetworkPlayerController] OnStopLocalPlayer called");
 
         if (!_useFallback)
         {
@@ -112,12 +154,28 @@ public class NetworkPlayerController : NetworkBehaviour
         if (LocalPlayerCamera != null) LocalPlayerCamera = null;
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
+        
+        _isInitialized = false;
     }
 
     private void Update()
     {
-        if (!isLocalPlayer || !_useFallback) return;
+        // 单机模式检查
+        bool isSinglePlayer = !NetworkClient.active && !NetworkServer.active;
+        bool canControl = isSinglePlayer || isLocalPlayer;
+        
+        if (!canControl) return;
+        
+        // 如果还没初始化，尝试初始化
+        if (!_isInitialized && isSinglePlayer)
+        {
+            ActivateControllers();
+        }
 
+        // 如果不是使用备用控制，就不处理（ThirdPersonController会处理）
+        if (!_useFallback) return;
+
+        // 备用控制逻辑
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             if (Cursor.lockState == CursorLockMode.Locked)
@@ -131,7 +189,9 @@ public class NetworkPlayerController : NetworkBehaviour
                 Cursor.visible = false;
             }
         }
-        if (Cursor.lockState != CursorLockMode.Locked) return;
+        
+        // 只在鼠标锁定时才移动（备用模式）
+        if (Cursor.lockState != CursorLockMode.Locked && _useFallback) return;
 
         FallbackJumpAndGravity();
         FallbackMove();
@@ -139,7 +199,10 @@ public class NetworkPlayerController : NetworkBehaviour
 
     private void LateUpdate()
     {
-        if (!isLocalPlayer || !_useFallback || _cameraTargetFallback == null) return;
+        bool isSinglePlayer = !NetworkClient.active && !NetworkServer.active;
+        bool canControl = isSinglePlayer || isLocalPlayer;
+        
+        if (!canControl || !_useFallback || _cameraTargetFallback == null) return;
         if (Cursor.lockState != CursorLockMode.Locked) return;
 
         FallbackCameraRotation();
@@ -246,19 +309,22 @@ public class NetworkPlayerController : NetworkBehaviour
 #pragma warning restore 0618
         if (vcam == null)
         {
-            Debug.LogWarning("[NetworkPlayerController] 场景中未找到 CinemachineVirtualCamera，请放置与 demo 一致的 PlayerFollowCamera。");
+            Debug.LogWarning("[NetworkPlayerController] 场景中未找到 CinemachineVirtualCamera");
             return;
         }
         var followProp = vcamType.GetProperty("Follow");
         if (followProp != null)
+        {
             followProp.SetValue(vcam, followTarget);
+            Debug.Log("[NetworkPlayerController] Cinemachine follow set successfully");
+        }
     }
 
     public static Ray GetLocalPlayerScreenPointToRay(Vector3 screenPosition)
     {
         if (LocalPlayerCamera != null)
             return LocalPlayerCamera.ScreenPointToRay(screenPosition);
-        Debug.LogWarning("[NetworkPlayerController] LocalPlayerCamera 为 null");
+        Debug.LogWarning("[NetworkPlayerController] LocalPlayerCamera is null");
         return new Ray();
     }
 

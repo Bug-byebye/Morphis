@@ -44,6 +44,12 @@ namespace StarterAssets
                 DisableRemotePlayerComponents();
                 Debug.Log($"[NetworkPlayerSetup] Remote player disabled input: {gameObject.name}");
             }
+            else
+            {
+                // Safety: ensure local player always has components enabled
+                EnableComponents(true);
+                Debug.Log($"[NetworkPlayerSetup] Local player components ensured enabled: {gameObject.name}");
+            }
         }
 
         private void DisableRemotePlayerComponents()

@@ -1040,6 +1040,8 @@ GameObject:
   - component: {fileID: -7466687123447195029}
   - component: {fileID: 5159944974937177735}
   - component: {fileID: -2318321424824875605}
+  - component: {fileID: 5847143830105546630}
+  - component: {fileID: -347315184875137938}
   m_Layer: 8
   m_Name: PlayerArmature_Network
   m_TagString: Player
@@ -1358,6 +1360,32 @@ MonoBehaviour:
   syncInterval: 0
   componentsToDisableForRemote: []
   cinemachineFollowTarget: {fileID: 8338988566280778637}
+--- !u!114 &5847143830105546630
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4416926081852918481}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1ddbde61295e4517a9bd4066da117cb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SceneChangeInputFix
+--- !u!114 &-347315184875137938
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4416926081852918481}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b34cde2b91a884eb68c5d1ef84d32c05, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInputDiagnostics
+  showDebugInfo: 1
+  autoFix: 1
 --- !u!1 &4523139366846529165
 GameObject:
   m_ObjectHideFlags: 0

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 # Vertex AI 配置
 PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "project-296af11f-afb9-44ba-a98")
 LOCATION = os.getenv("VERTEX_LOCATION", "global")
-MODEL_ID = os.getenv("VERTEX_MODEL_ID", "moonshotai/kimi-k2-thinking-maas")
+MODEL_ID = os.getenv("VERTEX_MODEL_ID", "qwen/qwen3-235b-a22b-instruct-2507-maas")
 
 # System prompt for the dog personality
 DOG_SYSTEM_PROMPT = """You are Buddy, a friendly and enthusiastic virtual dog companion in a 3D world game. 
@@ -77,7 +77,8 @@ def get_openai_client():
             
         client = OpenAI(
             api_key=token,
-            base_url=base_url
+            base_url=base_url,
+            timeout=15.0  # 15 second timeout to prevent hanging
         )
         return client
     except ImportError:
