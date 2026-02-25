@@ -1,0 +1,19 @@
+{
+  "name": "Morphis.Bootstrap",
+  "rootNamespace": "Morphis",
+  "references": [
+    "Morphis.Config",
+    "Mirror",
+    "Mirror.Transports"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
+

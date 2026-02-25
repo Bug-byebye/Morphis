@@ -12,8 +12,15 @@ namespace Morphis.Companion
     /// </summary>
     public static class DogChatAPI
     {
-        // Backend API URL - adjust if your server is running elsewhere
-        private static string apiUrl = "http://localhost:8000/chat";
+        // Backend API URL - from AppConfig.ApiBaseUrl
+        private static string apiUrl => BuildApiUrl();
+        private static string BuildApiUrl()
+        {
+            var baseUrl = Morphis.Config.AppConfig.Instance.ApiBaseUrl;
+            if (baseUrl.EndsWith("/"))
+                baseUrl = baseUrl.TrimEnd('/');
+            return $"{baseUrl}/chat";
+        }
         
         // Session ID for conversation continuity
         private static string sessionId = Guid.NewGuid().ToString();
@@ -153,11 +160,11 @@ namespace Morphis.Companion
         }
 
         /// <summary>
-        /// Set a custom API URL (useful for different server configurations).
+        /// Set a custom API URL (kept for API compatibility, now no-op).
         /// </summary>
         public static void SetApiUrl(string url)
         {
-            apiUrl = url;
+            // URL 统一由 AppConfig 提供，此处保留方法以避免调用方编译错误但不做任何事。
         }
     }
 

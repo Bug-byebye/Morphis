@@ -15,7 +15,7 @@ using TMPro;
 public class AIGeneratorPipeline : MonoBehaviour
 {
     [Header("Server Settings")]
-    [SerializeField] private string serverUrl = "http://localhost:8000/generate";
+    [SerializeField] private string serverUrl = "";
     
     [Header("UI References")]
     [SerializeField] private GameObject uiPanel;

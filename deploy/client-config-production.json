@@ -1,0 +1,6 @@
+{
+  "GameServerAddress": "your-server-ip-or-domain",
+  "GameServerPort": 7777,
+  "ApiBaseUrl": "http://your-server-ip-or-domain:8000",
+  "DefaultWorldId": "prod-world-001"
+}

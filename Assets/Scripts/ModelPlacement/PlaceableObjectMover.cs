@@ -1,5 +1,8 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using Mirror;
+using StarterAssets;
+using Morphis.WorldSnapshot;
 
 namespace Morphis.ModelPlacement
 {
@@ -20,6 +23,8 @@ namespace Morphis.ModelPlacement
         private Transform _playerTransform;
         private bool _moveMode = false;
         private bool _dragging = false; 
+        private Vector3 _pendingTargetPos;
+        private float _pendingGroundHeight;
 
         private void Awake()
         {
@@ -127,6 +132,33 @@ namespace Morphis.ModelPlacement
             _moveMode = false;
             _dragging = false;
             SetCollidersEnabled(true);
+
+            // 联机模式：客户端不能直接改 Transform，必须通过 Command -> Server -> RPC
+            if (NetworkClient.active)
+            {
+                var wo = GetComponent<WorldObject>();
+                if (wo == null || string.IsNullOrEmpty(wo.ObjectId))
+                {
+                    Debug.LogWarning("[PlaceableObjectMover] Network mode: missing WorldObject/object_id, cannot request move.");
+                    return;
+                }
+                if (NetworkPlayerSetup.Local == null)
+                {
+                    Debug.LogWarning("[PlaceableObjectMover] Network mode: no local player, cannot request move.");
+                    return;
+                }
+
+                NetworkPlayerSetup.Local.RequestMove(
+                    wo.ObjectId,
+                    _pendingTargetPos,
+                    transform.rotation,
+                    transform.localScale
+                );
+
+                Debug.Log($"[PlaceableObjectMover] Requested move (server-authoritative) for {name}, object_id={wo.ObjectId}");
+                return;
+            }
+
             Debug.Log($"[PlaceableObjectMover] Placed {name}");
         }
 
@@ -182,6 +214,15 @@ namespace Morphis.ModelPlacement
                         targetPos.z = clampedPlane.z;
                         // Y remains from ground point
                     }
+                }
+
+                _pendingTargetPos = targetPos;
+                _pendingGroundHeight = groundHeight;
+
+                // 联机模式：不直接改 Transform（避免客户端直改世界对象）
+                if (NetworkClient.active)
+                {
+                    return;
                 }
 
                 transform.position = targetPos;

@@ -6,6 +6,8 @@ using UnityEngine.UI;
 using TMPro;
 using GLTFast;
 using Morphis.WorldSnapshot;
+using Mirror;
+using StarterAssets;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -275,6 +277,13 @@ namespace Morphis.UI.HotBar
 
             if (item.Prefab != null)
             {
+                // 联机模式：客户端不直接 Instantiate
+                if (NetworkClient.active)
+                {
+                    if (NetworkPlayerSetup.Local == null) return false;
+                    return NetworkPlayerSetup.Local.RequestPlace($"{resourcesPath}/{item.Name}", worldPos, Quaternion.identity, Vector3.one);
+                }
+
                 var go = Instantiate(item.Prefab, worldPos, Quaternion.identity);
                 EnsureColliderFromRenderers(go);
                 NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
@@ -285,11 +294,24 @@ namespace Morphis.UI.HotBar
 
             if (item.GlbAsset != null)
             {
+                // 联机模式：客户端不直接加载/实例化，改为通知服务器生成 glb:<name>
+                if (NetworkClient.active)
+                {
+                    if (NetworkPlayerSetup.Local == null) return false;
+                    return NetworkPlayerSetup.Local.RequestPlace($"glb:{item.Name}", worldPos, Quaternion.identity, Vector3.one);
+                }
+
                 StartCoroutine(LoadGlbAndPlace(item.GlbAsset, item.Name, worldPos));
                 return true;
             }
 
             {
+                if (NetworkClient.active)
+                {
+                    if (NetworkPlayerSetup.Local == null) return false;
+                    return NetworkPlayerSetup.Local.RequestPlace($"primitive:{item.FallbackPrimitive}", worldPos, Quaternion.identity, Vector3.one);
+                }
+
                 var go = GameObject.CreatePrimitive(item.FallbackPrimitive);
                 go.name = item.Name;
                 go.transform.position = worldPos;

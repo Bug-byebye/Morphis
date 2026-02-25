@@ -22,9 +22,6 @@ namespace Morphis.AppFlow
     /// </summary>
     public class BootFlowManager : MonoBehaviour
     {
-        [Header("Backend")]
-        [SerializeField] private string baseUrl = "http://localhost:8000";
-
         [Header("Scene")]
         [SerializeField] private string mainSceneName = "MainScene";
         [SerializeField] private Material backgroundSkybox;
@@ -63,6 +60,7 @@ namespace Morphis.AppFlow
         private string RegisterUrl => $"{AppSession.BaseUrl}/auth/register";
         private string WorkspacesUrl => $"{AppSession.BaseUrl}/workspaces";
         private string CreateWorkspaceUrl => $"{AppSession.BaseUrl}/workspaces/create";
+        private string JoinWorldUrl => $"{AppSession.BaseUrl}/workspaces/join";
 
         private static BootFlowManager _instance;
         private bool _initialized;
@@ -101,7 +99,11 @@ namespace Morphis.AppFlow
                 _instance = this;
             }
 
-            AppSession.BaseUrl = baseUrl;
+            // 确保 AppSession.BaseUrl 从配置文件初始化（不再需要手动设置，getter 会自动处理）
+            // 但为了确保配置已加载，我们在这里触发一次访问
+            var baseUrl = AppSession.BaseUrl;
+            Debug.Log($"[BootFlow] AppSession.BaseUrl initialized: {baseUrl}");
+            
             DontDestroyOnLoad(gameObject);
             
             // Auto-add Global Scene Controller for ESC key handling
@@ -848,9 +850,59 @@ namespace Morphis.AppFlow
             }
 
             _busy = true;
-            SetStatus($"Entering: {_selectedWorkspaceName} ...");
+            SetStatus($"Requesting world: {_selectedWorkspaceName} ...");
 
+            // 调用 /workspaces/join API 获取 World 连接信息
+            string serverAddress = null;
+            int serverPort = 0;
+            
+            var body = $"{{\"world_id\":\"{EscapeJson(_selectedWorkspaceId)}\"}}";
+            var bodyRaw = Encoding.UTF8.GetBytes(body);
+
+            using (var req = new UnityWebRequest(JoinWorldUrl, "POST"))
+            {
+                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type", "application/json");
+                req.SetRequestHeader("Authorization", $"Bearer {AppSession.Token}");
+
+                yield return req.SendWebRequest();
+
+                if (req.result != UnityWebRequest.Result.Success)
+                {
+                    SetStatus($"Join world failed: {req.error}");
+                    _busy = false;
+                    yield break;
+                }
+
+                if (req.responseCode >= 400)
+                {
+                    SetStatus($"Join world failed ({req.responseCode}): {req.downloadHandler.text}");
+                    _busy = false;
+                    yield break;
+                }
+
+                // 解析响应：{"status":"ok","world_id":"...","server_address":"...","server_port":7777}
+                var json = req.downloadHandler.text;
+                serverAddress = ExtractJsonField(json, "server_address");
+                var portStr = ExtractJsonField(json, "server_port");
+                if (!string.IsNullOrEmpty(portStr) && int.TryParse(portStr, out serverPort))
+                {
+                    Debug.Log($"[BootFlow] World ready: {serverAddress}:{serverPort}");
+                }
+                else
+                {
+                    SetStatus("Failed to parse server connection info");
+                    _busy = false;
+                    yield break;
+                }
+            }
+
+            // 保存连接信息到 AppSession
             AppSession.SetWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
+            AppSession.SetServerConnection(serverAddress, serverPort);
+
+            SetStatus($"Connecting to {serverAddress}:{serverPort} ...");
 
             // 立即隐藏/销毁 BootScene 的 UI，确保不会在加载过程中显示
             if (_canvas != null)

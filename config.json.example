@@ -1,0 +1,6 @@
+{
+  "GameServerAddress": "your-game-server.example.com",
+  "GameServerPort": 7777,
+  "ApiBaseUrl": "https://your-backend-api.example.com",
+  "DefaultWorldId": "default-world-001"
+}

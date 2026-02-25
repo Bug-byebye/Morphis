@@ -27,7 +27,7 @@ from services import text2image, image2image, image23d, text23d
 from services.dog_chat import ChatRequest, ChatResponse, chat_with_dog, clear_conversation
 
 # 导入世界快照路由和数据库初始化
-from routers import world
+from routers import world, world_manager
 from database import init_db, get_db
 from crud import get_user_by_username, create_user, get_workspaces_for_user, get_or_create_world, create_workspace_with_coowners
 from models.world import WorldMember
@@ -43,6 +43,8 @@ def startup_db():
 
 # 注册世界快照路由
 app.include_router(world.router)
+# 注册世界进程管理路由
+app.include_router(world_manager.router)
 
 # CORS 中间件 - 允许 Unity 跨域请求
 app.add_middleware(
@@ -84,6 +86,9 @@ class WorkspaceDto(BaseModel):
     id: str
     name: str
     members: List[str]
+    status: str = "stopped"  # World 运行状态
+    port: int = None  # 连接端口
+    player_count: int = 0  # 当前玩家数
 
 class WorkspaceListResponse(BaseModel):
     items: List[WorkspaceDto]
@@ -97,6 +102,18 @@ class CreateWorkspaceRequest(BaseModel):
 class CreateWorkspaceResponse(BaseModel):
     id: str
     name: str
+
+
+class JoinWorldRequest(BaseModel):
+    world_id: str
+
+
+class JoinWorldResponse(BaseModel):
+    status: str
+    world_id: str
+    server_address: str
+    server_port: int
+    message: str = ""
 
 
 # ========== 会话：token -> username（内存，重启后需重新登录） ==========
@@ -187,7 +204,64 @@ async def create_workspace(
         return Response(content=str(e), status_code=400)
 
 
-@app.get("/workspaces", response_model=WorkspaceListResponse)
+@app.post("/workspaces/join", response_model=JoinWorldResponse)
+async def join_world(
+    request: JoinWorldRequest,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    请求加入 World
+    
+    流程：
+    1. 验证用户权限（是否为 World 成员）
+    2. 检查 World 是否运行
+    3. 未运行则启动 World
+    4. 返回连接信息（IP + Port）
+    """
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+    
+    user = get_user_by_username(db, username)
+    if user is None:
+        return Response(content="User not found", status_code=401)
+    
+    # 验证用户是否有权限访问该 World
+    from models.world import World, WorldMember
+    world = db.query(World).filter(World.id == request.world_id).first()
+    if not world:
+        return Response(content="World not found", status_code=404)
+    
+    # 检查是否为 owner 或 member
+    is_owner = world.owner_user_id == user.id
+    is_member = db.query(WorldMember).filter(
+        WorldMember.world_id == request.world_id,
+        WorldMember.user_id == user.id
+    ).first() is not None
+    
+    if not (is_owner or is_member):
+        return Response(content="Access denied", status_code=403)
+    
+    # 启动或获取 World
+    from services.world_manager import get_world_manager
+    manager = get_world_manager()
+    result = manager.start_world(db, request.world_id)
+    
+    if result["status"] == "error":
+        return Response(content=result["message"], status_code=500)
+    
+    # 获取服务器公网 IP（从环境变量或配置）
+    server_ip = os.getenv("SERVER_PUBLIC_IP", "127.0.0.1")
+    
+    return JoinWorldResponse(
+        status="ok",
+        world_id=request.world_id,
+        server_address=server_ip,
+        server_port=result["port"],
+        message=f"World ready on {server_ip}:{result['port']}"
+    )
 async def list_workspaces(
     authorization: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
@@ -195,6 +269,7 @@ async def list_workspaces(
     """
     获取当前账号的 workspace 列表（从 World + WorldMember 查）
     Header: Authorization: Bearer <token>
+    返回包含 World 运行状态和连接信息
     """
     try:
         username = _require_user(authorization)
@@ -204,7 +279,21 @@ async def list_workspaces(
     if user is None:
         return Response(content="User not found", status_code=401)
     rows = get_workspaces_for_user(db, user.id)
-    items = [WorkspaceDto(id=r["id"], name=r["name"], members=r["members"]) for r in rows]
+    
+    # 获取每个 World 的运行状态
+    from models.world import World
+    items = []
+    for r in rows:
+        world = db.query(World).filter(World.id == r["id"]).first()
+        items.append(WorkspaceDto(
+            id=r["id"],
+            name=r["name"],
+            members=r["members"],
+            status=world.status.value if world else "stopped",
+            port=world.port if world else None,
+            player_count=world.player_count if world else 0
+        ))
+    
     return WorkspaceListResponse(items=items)
 
 

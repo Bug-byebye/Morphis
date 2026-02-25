@@ -110,6 +110,44 @@ Morphis/
 - Trimesh
 - NumPy
 
+## 云服务器部署
+
+### 快速部署（5 分钟）
+
+详见 `QUICK_START_DEPLOYMENT.md`
+
+```bash
+# 1. 上传部署脚本到服务器
+scp deploy/setup-server.sh user@your-server:/tmp/
+
+# 2. SSH 连接并运行
+ssh user@your-server
+cd /tmp && chmod +x setup-server.sh && ./setup-server.sh
+
+# 3. 构建 Unity Server（Linux Dedicated Server）
+# 4. 上传并部署
+scp -r Builds/LinuxServer/* user@your-server:/home/user/MorphisServer/
+scp deploy/setup-unity-server.sh user@your-server:/tmp/
+ssh user@your-server
+cd /tmp && chmod +x setup-unity-server.sh && ./setup-unity-server.sh /home/user/MorphisServer
+```
+
+### 部署文档
+
+- 📖 `DEPLOYMENT_SUMMARY.md` - 部署文档总览
+- 🚀 `QUICK_START_DEPLOYMENT.md` - 5 分钟快速部署
+- 📚 `DEPLOYMENT_GUIDE.md` - 完整部署指南
+- ✅ `DEPLOYMENT_CHECKLIST.md` - 部署检查清单
+- 🎮 `CLIENT_BUILD_GUIDE.md` - 客户端构建指南
+- ⚙️ `CONFIG_SETUP.md` - 配置文件详解
+
+### 自动化脚本
+
+- `deploy/setup-server.sh` - Python Backend 自动部署
+- `deploy/setup-unity-server.sh` - Unity Server 自动部署
+- `deploy/health-check.sh` - 服务健康检查
+- `deploy/backup.sh` - 数据自动备份
+
 ## 开源协议
 
 MIT License
