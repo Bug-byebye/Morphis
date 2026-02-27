@@ -45,19 +45,18 @@ namespace Morphis.Config
                 AppConfig.Instance = data;
                 
                 // Server 模式：允许环境变量覆盖端口（用于动态端口分配）
-                if (AppRuntime.IsServer)
+                var envPort = Environment.GetEnvironmentVariable("WORLD_PORT");
+                if (!string.IsNullOrEmpty(envPort) && int.TryParse(envPort, out int port))
                 {
-                    var envPort = Environment.GetEnvironmentVariable("WORLD_PORT");
-                    if (!string.IsNullOrEmpty(envPort) && int.TryParse(envPort, out int port))
-                    {
-                        data.GameServerPort = port;
-                        Debug.Log($"[ConfigLoader] Server port overridden by WORLD_PORT env: {port}");
-                    }
+                    data.ServerPort = port;
+                    Debug.Log($"[ConfigLoader] Server port overridden by WORLD_PORT env: {port}");
                 }
 
                 Debug.Log("=== CONFIG LOADED ===");
-                Debug.Log($"GameServerAddress: {data.GameServerAddress}");
-                Debug.Log($"GameServerPort:   {data.GameServerPort}");
+                Debug.Log($"ApiBaseUrl:       {data.ApiBaseUrl}");
+                Debug.Log($"ServerListenAddress: {data.ServerListenAddress}");
+                Debug.Log($"ServerPort:       {data.ServerPort}");
+                Debug.Log($"DefaultWorldId:   {data.DefaultWorldId}");
                 Debug.Log($"ApiBaseUrl:       {data.ApiBaseUrl}");
                 Debug.Log($"DefaultWorldId:   {data.DefaultWorldId}");
             }
@@ -108,25 +107,13 @@ namespace Morphis.Config
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(data.GameServerAddress))
-            {
-                FailFast($"GameServerAddress is empty. Path: {path}");
-            }
-
-            if (data.GameServerPort <= 0)
-            {
-                FailFast($"GameServerPort must be > 0. Current: {data.GameServerPort}. Path: {path}");
-            }
-
             if (string.IsNullOrWhiteSpace(data.ApiBaseUrl))
             {
                 FailFast($"ApiBaseUrl is empty. Path: {path}");
             }
 
-            if (string.IsNullOrWhiteSpace(data.DefaultWorldId))
-            {
-                FailFast($"DefaultWorldId is empty. Path: {path}");
-            }
+            // ServerListenAddress 和 ServerPort 有默认值，不强制要求
+            // DefaultWorldId 有默认值，不强制要求
         }
 
         private static void FailFast(string message)

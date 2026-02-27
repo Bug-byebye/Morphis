@@ -1,157 +1,217 @@
-# 部署脚本说明
+# Morphis 部署脚本
 
-本目录包含自动化部署脚本，用于快速在云服务器上部署 Morphis 项目。
+本目录包含 Morphis 多 World 动态调度架构的自动化部署脚本。
 
-## 文件说明
+## 架构说明
 
-- `setup-server.sh` - Python Backend 自动部署脚本
-- `setup-unity-server.sh` - Unity Server 自动部署脚本
-- `client-config-production.json` - 客户端生产环境配置模板
-- `health-check.sh` - 服务健康检查脚本
-- `backup.sh` - 数据备份脚本
+新架构特点：
+- ✅ 每个 World 独立进程
+- ✅ 自动启动/停止 World
+- ✅ 动态端口分配（7777-7826）
+- ✅ 空闲 World 自动清理（5 分钟）
+- ✅ 玩家数量实时监控
 
-## 快速开始
+## 脚本列表
 
-### 1. 部署 Python Backend
+### 1. setup-server.sh
+**用途**: 一键部署 Backend 和数据库
 
+**功能**:
+- 安装 PostgreSQL 数据库
+- 配置 Python Backend
+- 创建 World 进程管理器
+- 配置防火墙（端口 7777-7826）
+- 创建 systemd 服务
+
+**使用方法**:
 ```bash
 # 上传脚本到服务器
-scp deploy/setup-server.sh user@your-server:/tmp/
+scp deploy/setup-server.sh your-username@your-server-ip:/tmp/
 
 # SSH 连接到服务器
-ssh user@your-server
+ssh your-username@your-server-ip
 
-# 运行部署脚本
+# 运行脚本
 cd /tmp
 chmod +x setup-server.sh
 ./setup-server.sh
 ```
 
-脚本会自动：
-- 安装所有依赖（Python、PostgreSQL、Nginx）
-- 配置数据库
-- 创建虚拟环境并安装 Python 包
-- 创建 Systemd 服务
-- 配置防火墙
+**交互提示**:
+1. 数据库密码（默认: morphis123）
+2. 部署目录（默认: /home/your-username/Morphis）
+3. 是否克隆 Git 仓库（如果目录不存在）
 
-### 2. 构建 Unity Server
+### 2. health-check.sh
+**用途**: 检查服务健康状态
 
-在 Windows 开发机上：
+**功能**:
+- 检查 Backend 服务状态
+- 检查数据库连接
+- 检查端口监听
+- 检查 World 进程
 
-1. 打开 Unity 项目
-2. `File > Build Settings`
-3. 选择 `Dedicated Server` 平台
-4. 选择 `Linux` 目标
-5. 点击 `Switch Platform`
-6. 复制 `deploy/client-config-production.json` 到 `Assets/StreamingAssets/config.json`
-7. 编辑配置文件，填入你的服务器地址
-8. 点击 `Build`，选择输出目录（如 `Builds/LinuxServer`）
-
-### 3. 上传 Unity Server
-
+**使用方法**:
 ```bash
-# 在本地 Windows 上（PowerShell 或 Git Bash）
-scp -r Builds/LinuxServer/* user@your-server:/home/user/MorphisServer/
-scp deploy/setup-unity-server.sh user@your-server:/tmp/
+chmod +x deploy/health-check.sh
+./deploy/health-check.sh
 ```
 
-### 4. 部署 Unity Server
+### 3. backup.sh
+**用途**: 备份数据库和配置
+
+**功能**:
+- 备份 PostgreSQL 数据库
+- 备份 Backend 配置
+- 压缩并保存到指定目录
+
+**使用方法**:
+```bash
+chmod +x deploy/backup.sh
+./deploy/backup.sh
+```
+
+### 4. client-config-production.json
+**用途**: 生产环境客户端配置模板
+
+**使用方法**:
+```bash
+# 复制到项目根目录
+cp deploy/client-config-production.json config.json
+
+# 编辑配置
+nano config.json
+```
+
+## 快速部署（30 分钟）
+
+### 步骤 1: 上传项目代码
 
 ```bash
-# SSH 连接到服务器
-ssh user@your-server
+# 方式 A: 使用 Git（推荐）
+ssh your-username@your-server-ip
+git clone <your-repo-url> /home/your-username/Morphis
 
-# 运行部署脚本
+# 方式 B: 手动上传
+scp -r Backend your-username@your-server-ip:/home/your-username/Morphis/
+```
+
+### 步骤 2: 部署 Backend
+
+```bash
+scp deploy/setup-server.sh your-username@your-server-ip:/tmp/
+ssh your-username@your-server-ip
 cd /tmp
-chmod +x setup-unity-server.sh
-./setup-unity-server.sh /home/user/MorphisServer
+chmod +x setup-server.sh
+./setup-server.sh
 ```
 
-### 5. 验证部署
+### 步骤 3: 构建 Unity Server
+
+1. Unity 切换到 `Dedicated Server` 平台（Linux）
+2. 配置 `Assets/StreamingAssets/config.json`:
+   ```json
+   {
+     "GameServerAddress": "0.0.0.0",
+     "GameServerPort": 7777,
+     "ApiBaseUrl": "http://localhost:8000",
+     "DefaultWorldId": "default-world"
+   }
+   ```
+3. 构建到 `Builds/LinuxServer`
+
+### 步骤 4: 上传 Unity Server
 
 ```bash
-# 检查服务状态
+scp -r Builds/LinuxServer/* your-username@your-server-ip:/home/your-username/Morphis/MorphisServer/
+ssh your-username@your-server-ip
+chmod +x /home/your-username/Morphis/MorphisServer/Morphis.x86_64
+```
+
+### 步骤 5: 测试部署
+
+```bash
+cd /home/your-username/Morphis/Backend
+source venv/bin/activate
+python test_world_manager.py
+```
+
+## 配置说明
+
+### Backend 环境变量 (.env)
+
+自动生成：
+```bash
+DATABASE_URL=postgresql://morphis_user:password@localhost:5432/morphis_db
+HOST=0.0.0.0
+PORT=8000
+UNITY_SERVER_PATH=/home/your-username/Morphis/MorphisServer/Morphis.x86_64
+SERVER_PUBLIC_IP=<自动检测>
+API_BASE_URL=http://localhost:8000
+```
+
+### Unity Server 配置 (config.json)
+
+需要手动创建：
+```json
+{
+  "GameServerAddress": "0.0.0.0",
+  "GameServerPort": 7777,
+  "ApiBaseUrl": "http://localhost:8000",
+  "DefaultWorldId": "default-world"
+}
+```
+
+### 客户端配置 (config.json)
+
+```json
+{
+  "GameServerAddress": "your-server-ip",
+  "GameServerPort": 7777,
+  "ApiBaseUrl": "http://your-server-ip:8000",
+  "DefaultWorldId": "default-world"
+}
+```
+
+## 管理命令
+
+### Backend 管理
+
+```bash
 sudo systemctl status morphis-backend
-sudo systemctl status morphis-server
-
-# 测试 API
-curl http://localhost:8000/health
-
-# 检查端口
-sudo netstat -tulpn | grep 7777
-sudo netstat -tulpn | grep 8000
-
-# 查看日志
-sudo journalctl -u morphis-backend -f
-sudo journalctl -u morphis-server -f
-```
-
-## 配置客户端
-
-### 开发环境
-
-使用 `config.json`:
-```json
-{
-  "GameServerAddress": "127.0.0.1",
-  "GameServerPort": 7777,
-  "ApiBaseUrl": "http://127.0.0.1:8000",
-  "DefaultWorldId": "dev-world"
-}
-```
-
-### 生产环境
-
-1. 复制 `deploy/client-config-production.json` 到项目根目录
-2. 重命名为 `config.json`
-3. 编辑文件，替换 `your-server-ip-or-domain` 为实际地址
-4. 构建客户端
-
-示例：
-```json
-{
-  "GameServerAddress": "game.example.com",
-  "GameServerPort": 7777,
-  "ApiBaseUrl": "https://api.example.com",
-  "DefaultWorldId": "prod-world-001"
-}
-```
-
-## 服务管理
-
-### 启动/停止服务
-
-```bash
-# Backend
-sudo systemctl start morphis-backend
-sudo systemctl stop morphis-backend
 sudo systemctl restart morphis-backend
-
-# Unity Server
-sudo systemctl start morphis-server
-sudo systemctl stop morphis-server
-sudo systemctl restart morphis-server
-```
-
-### 查看日志
-
-```bash
-# 实时日志
 sudo journalctl -u morphis-backend -f
-sudo journalctl -u morphis-server -f
-
-# 最近 100 行
-sudo journalctl -u morphis-backend -n 100
-
-# 错误日志
-sudo journalctl -u morphis-backend -p err
 ```
 
-### 查看服务状态
+### World 管理
 
 ```bash
-sudo systemctl status morphis-backend
-sudo systemctl status morphis-server
+# 列出所有 World
+curl http://localhost:8000/worlds/manage/list
+
+# 查看 World 状态
+curl http://localhost:8000/worlds/manage/status/<world-id>
+
+# 启动 World
+curl -X POST http://localhost:8000/worlds/manage/start \
+  -H "Content-Type: application/json" \
+  -d '{"world_id":"<world-id>"}'
+
+# 停止 World
+curl -X POST http://localhost:8000/worlds/manage/stop \
+  -H "Content-Type: application/json" \
+  -d '{"world_id":"<world-id>","force":false}'
+```
+
+### 日志查看
+
+```bash
+# Backend 日志
+sudo journalctl -u morphis-backend -f
+
+# World 日志
+tail -f /var/log/morphis-worlds/<world-id>.log
+ls -la /var/log/morphis-worlds/
 ```
 
 ## 故障排查
@@ -159,53 +219,30 @@ sudo systemctl status morphis-server
 ### Backend 无法启动
 
 ```bash
-# 查看详细日志
-sudo journalctl -u morphis-backend -n 100 --no-pager
-
-# 检查数据库连接
+sudo journalctl -u morphis-backend -n 100
 psql -U morphis_user -d morphis_db -h localhost
-
-# 手动启动测试
-cd /home/user/Morphis/Backend
-source venv/bin/activate
-python server.py
+cd /home/your-username/Morphis/Backend && source venv/bin/activate && python server.py
 ```
 
-### Unity Server 无法启动
+### World 无法启动
 
 ```bash
-# 查看日志
-tail -f /var/log/morphis-server.log
-
-# 检查配置
-cat /home/user/MorphisServer/config.json
-
-# 手动启动测试
-cd /home/user/MorphisServer
+ls -la /home/your-username/Morphis/MorphisServer/Morphis.x86_64
+chmod +x /home/your-username/Morphis/MorphisServer/Morphis.x86_64
+cd /home/your-username/Morphis/MorphisServer
 ./Morphis.x86_64 --mode=server --worldId=test -batchmode -nographics
+tail -f /var/log/morphis-worlds/test.log
 ```
 
-### 客户端无法连接
+### 端口冲突
 
 ```bash
-# 检查防火墙
-sudo ufw status
-
-# 检查端口监听
 sudo netstat -tulpn | grep 7777
-
-# 测试连通性（在客户端执行）
-telnet your-server-ip 7777
+sudo kill -9 <PID>
 ```
 
-## 安全建议
+## 相关文档
 
-1. **修改默认数据库密码**
-2. **配置 SSL 证书**（使用 Let's Encrypt）
-3. **启用 fail2ban** 防止暴力破解
-4. **定期备份数据**
-5. **监控服务器资源**
-
-## 更多信息
-
-详细部署指南请参考：`DEPLOYMENT_GUIDE.md`
+- [完整部署指南](../DEPLOY_MULTI_WORLD.md)
+- [多 World 架构说明](../MULTI_WORLD_ARCHITECTURE.md)
+- [架构迁移总结](../ARCHITECTURE_MIGRATION_SUMMARY.md)

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Mirror;
+using Morphis.AppFlow;
 
 namespace Morphis
 {
@@ -98,34 +99,49 @@ namespace Morphis
         {
             if (manager == null) return;
             
-            // 客户端模式：优先使用 AppSession 中的动态服务器地址（从 /workspaces/join 获取）
-            // 服务器模式：使用配置文件中的地址
-            if (!AppRuntime.IsServer && !string.IsNullOrEmpty(Morphis.AppFlow.AppSession.ServerAddress))
+            var config = Morphis.Config.AppConfig.Instance;
+            
+            if (AppRuntime.IsServer)
             {
-                // 客户端：使用动态分配的服务器地址
-                manager.networkAddress = Morphis.AppFlow.AppSession.ServerAddress;
+                // Server 模式：使用配置文件中的监听地址和端口
+                manager.networkAddress = config.ServerListenAddress;
                 
                 var telepathy = manager.GetComponent<TelepathyTransport>();
                 if (telepathy != null)
                 {
-                    telepathy.port = (ushort)Morphis.AppFlow.AppSession.ServerPort;
+                    telepathy.port = (ushort)config.ServerPort;
                 }
                 
-                Debug.Log($"[AppBootstrap] Client connecting to dynamic server: {manager.networkAddress}:{Morphis.AppFlow.AppSession.ServerPort}");
+                Debug.Log($"[AppBootstrap] Server listening on: {manager.networkAddress}:{config.ServerPort}");
             }
             else
             {
-                // 服务器或未设置动态地址：使用配置文件
-                var config = Morphis.Config.AppConfig.Instance;
-                manager.networkAddress = config.GameServerAddress;
-
-                var telepathy = manager.GetComponent<TelepathyTransport>();
-                if (telepathy != null)
+                // 客户端模式：使用 AppSession 中的动态服务器地址（从 /workspaces/join 获取）
+                if (!string.IsNullOrEmpty(AppSession.ServerAddress))
                 {
-                    telepathy.port = (ushort)config.GameServerPort;
+                    manager.networkAddress = AppSession.ServerAddress;
+                    
+                    var telepathy = manager.GetComponent<TelepathyTransport>();
+                    if (telepathy != null)
+                    {
+                        telepathy.port = (ushort)AppSession.ServerPort;
+                    }
+                    
+                    Debug.Log($"[AppBootstrap] Client connecting to dynamic server: {manager.networkAddress}:{AppSession.ServerPort}");
                 }
-                
-                Debug.Log($"[AppBootstrap] Using config address: {manager.networkAddress}:{config.GameServerPort}");
+                else
+                {
+                    // Fallback：如果没有动态地址（例如直接 Play MainScene），使用 localhost
+                    manager.networkAddress = "127.0.0.1";
+                    
+                    var telepathy = manager.GetComponent<TelepathyTransport>();
+                    if (telepathy != null)
+                    {
+                        telepathy.port = (ushort)config.ServerPort;
+                    }
+                    
+                    Debug.LogWarning($"[AppBootstrap] No dynamic server address, using fallback: {manager.networkAddress}:{config.ServerPort}");
+                }
             }
         }
 

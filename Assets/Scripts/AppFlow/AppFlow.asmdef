@@ -1,11 +1,11 @@
 {
-  "name": "Morphis.Bootstrap",
-  "rootNamespace": "Morphis",
+  "name": "Morphis.AppFlow",
+  "rootNamespace": "Morphis.AppFlow",
   "references": [
     "Morphis.Config",
-    "Morphis.AppFlow",
+    "Unity.TextMeshPro",
     "Mirror",
-    "Mirror.Transports"
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
@@ -17,4 +17,3 @@
   "versionDefines": [],
   "noEngineReferences": false
 }
-
