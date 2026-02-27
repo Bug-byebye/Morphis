@@ -41,13 +41,25 @@ namespace Morphis.Companion
         private Vector3 _lastTargetPosition;
         private Vector3 _smoothedMoveDirection;
         private DogChatUI _chatUI;
+        private int _currentAnimId = -1;
+        private static readonly int AnimationIDHash = Animator.StringToHash("AnimationID");
 
         private void Awake()
         {
+            // Validate animation IDs - serialized values in the prefab may be stale
+            if (walkAnimId != 2 || runAnimId != 4 || idleAnimId != 0)
+            {
+                Debug.LogWarning($"[DogCompanion] Animation IDs were incorrect (idle={idleAnimId}, walk={walkAnimId}, run={runAnimId}). " +
+                    "Resetting to correct values (idle=0, walk=2, run=4). Please update the prefab in Inspector.");
+                idleAnimId = 0;
+                walkAnimId = 2;
+                runAnimId = 4;
+            }
+
             _agent = GetComponent<NavMeshAgent>();
-            _animator = GetComponent<Animator>();
             
-            // Animator might be on child object (common for imported 3D models)
+            // Find Animator - check self first, then children (common for imported 3D models)
+            _animator = GetComponent<Animator>();
             if (_animator == null)
             {
                 _animator = GetComponentInChildren<Animator>();
@@ -57,6 +69,32 @@ namespace Morphis.Companion
             {
                 // Disable root motion so NavMeshAgent controls movement
                 _animator.applyRootMotion = false;
+                
+                // Verify the AnimationID parameter exists
+                bool hasParam = false;
+                foreach (var p in _animator.parameters)
+                {
+                    if (p.name == "AnimationID" && p.type == AnimatorControllerParameterType.Int)
+                    {
+                        hasParam = true;
+                        break;
+                    }
+                }
+                
+                if (!hasParam)
+                {
+                    Debug.LogError("[DogCompanion] Animator found but missing 'AnimationID' int parameter! " +
+                        "Make sure the Dog_Animator_Controler is assigned to the Animator component.");
+                }
+                else
+                {
+                    Debug.Log($"[DogCompanion] Animator found on '{_animator.gameObject.name}' with AnimationID parameter ✓");
+                }
+            }
+            else
+            {
+                Debug.LogError("[DogCompanion] No Animator found on this GameObject or its children! " +
+                    "The dog will not animate. Make sure the dog model has an Animator component with Dog_Animator_Controler assigned.");
             }
 
             // Create chat UI
@@ -67,6 +105,10 @@ namespace Morphis.Companion
 
             // Prevent dog from pushing the player
             _agent.obstacleAvoidanceType = ObstacleAvoidanceType.NoObstacleAvoidance;
+
+            // Sync NavMeshAgent update with Animator for smoother movement
+            _agent.updatePosition = true;
+            _agent.updateRotation = true;
 
             // Ignore collisions between dog and player layers at the physics level
             var rb = GetComponent<Rigidbody>();
@@ -252,13 +294,19 @@ namespace Morphis.Companion
             _agent.speed = shouldRun ? runSpeed : walkSpeed;
 
             // Set destination (only if agent is active and on NavMesh)
-            if (distanceToTarget > stoppingDistance && _agent.isActiveAndEnabled)
+            bool isMoving = distanceToTarget > stoppingDistance;
+            if (isMoving && _agent.isActiveAndEnabled)
             {
                 _agent.SetDestination(targetPos);
             }
+            else if (_agent.isActiveAndEnabled && _agent.hasPath)
+            {
+                // Stop the agent when close enough
+                _agent.ResetPath();
+            }
 
-            // Update animation based on agent velocity
-            UpdateAnimation();
+            // Update animation based on movement state
+            UpdateAnimation(distanceToTarget, shouldRun);
 
             _lastTargetPosition = target.position;
         }
@@ -299,27 +347,38 @@ namespace Morphis.Companion
             return targetPos;
         }
 
-        private void UpdateAnimation()
+        private void UpdateAnimation(float distanceToTarget, bool shouldRun)
         {
             if (_animator == null) return;
 
-            float speed = _agent.velocity.magnitude;
+            // Use both velocity and distance to determine animation state
+            // _agent.velocity can report near-zero even when the dog is actively navigating
+            // so we also check desiredVelocity and distance to target
+            float velocity = _agent.velocity.magnitude;
+            float desiredVelocity = _agent.desiredVelocity.magnitude;
+            float effectiveSpeed = Mathf.Max(velocity, desiredVelocity);
 
             int animId;
-            if (speed < 0.1f)
+            if (distanceToTarget <= stoppingDistance || effectiveSpeed < 0.05f)
             {
-                animId = idleAnimId;
+                animId = idleAnimId;     // 0 = Breathing (idle)
             }
-            else if (speed < walkSpeed * 1.5f)
+            else if (shouldRun)
             {
-                animId = walkAnimId;
+                animId = runAnimId;      // 4 = Running
             }
             else
             {
-                animId = runAnimId;
+                animId = walkAnimId;     // 2 = Walking
             }
 
-            _animator.SetInteger("AnimationID", animId);
+            // Only set the parameter when the animation actually changes
+            if (animId != _currentAnimId)
+            {
+                _currentAnimId = animId;
+                _animator.SetInteger(AnimationIDHash, animId);
+                Debug.Log($"[DogCompanion] Animation → ID={animId} (vel={velocity:F2}, desiredVel={desiredVelocity:F2}, dist={distanceToTarget:F2}, run={shouldRun})");
+            }
         }
 
         /// <summary>

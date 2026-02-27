@@ -23,7 +23,7 @@ namespace AIPipeline.Nodes
         
         private void Awake()
         {
-            nodeName = "Text to Image";
+            nodeName = "文生图";
             nodeColor = new Color(1f, 0.85f, 0.4f); // 橙黄色
         }
         

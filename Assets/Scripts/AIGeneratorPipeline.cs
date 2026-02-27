@@ -306,8 +306,8 @@ public class AIGeneratorPipeline : MonoBehaviour
         hlg.childControlWidth = true;
         hlg.childForceExpandWidth = true;
         
-        CreateButton(btnsObj.transform, "Place in Scene", new Color(0.3f, 0.7f, 0.3f), OnPlaceInScene);
-        CreateButton(btnsObj.transform, "Close", new Color(0.5f, 0.5f, 0.5f), OnClosePreview);
+        CreateButton(btnsObj.transform, "放置到场景", new Color(0.3f, 0.7f, 0.3f), OnPlaceInScene);
+        CreateButton(btnsObj.transform, "关闭", new Color(0.5f, 0.5f, 0.5f), OnClosePreview);
     }
     
     private void CreateButton(Transform parent, string text, Color color, UnityEngine.Events.UnityAction onClick)

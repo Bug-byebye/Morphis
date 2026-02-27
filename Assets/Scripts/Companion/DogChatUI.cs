@@ -92,7 +92,7 @@ namespace Morphis.Companion
             if (string.IsNullOrEmpty(userMessage)) return;
 
             // Display user message
-            AddMessage("You", userMessage, userMessageColor);
+            AddMessage("你", userMessage, userMessageColor);
             inputField.text = "";
             inputField.ActivateInputField();
 
@@ -108,7 +108,7 @@ namespace Morphis.Companion
                 },
                 error => {
                     if (typingMsg != null) Destroy(typingMsg);
-                    AddMessage(dogName, "*whimpers* Something went wrong...", dogMessageColor);
+                    AddMessage(dogName, "*呜呜* 出了点问题...", dogMessageColor);
                     Debug.LogError($"[DogChatUI] API Error: {error}");
                 }
             );
@@ -179,7 +179,7 @@ namespace Morphis.Companion
             var headerImage = header.AddComponent<Image>();
             headerImage.color = new Color(0.15f, 0.15f, 0.2f);
 
-            var titleText = CreateTextChild(header, "Title", $"Chat with {dogName}");
+            var titleText = CreateTextChild(header, "Title", $"与 {dogName} 聊天");
             titleText.alignment = TextAlignmentOptions.Center;
             titleText.fontSize = 24;
             var titleRect = titleText.GetComponent<RectTransform>();
@@ -250,7 +250,7 @@ namespace Morphis.Companion
             inputTextRect.anchorMax = Vector2.one;
             inputTextRect.sizeDelta = new Vector2(-10, 0);
 
-            var placeholder = CreateTextChild(inputObj, "Placeholder", "Type a message...");
+            var placeholder = CreateTextChild(inputObj, "Placeholder", "输入消息...");
             placeholder.color = new Color(0.5f, 0.5f, 0.5f);
             placeholder.fontStyle = FontStyles.Italic;
             inputField.placeholder = placeholder;
@@ -286,7 +286,7 @@ namespace Morphis.Companion
             sendText.fontSize = 22;
 
             // Add welcome message
-            AddMessage(dogName, $"*wags tail* Woof! Hi there! I'm {dogName}!", dogMessageColor);
+            AddMessage(dogName, $"*摇尾巴* 汪！你好呀！我是{dogName}！", dogMessageColor);
         }
 
         private GameObject CreateChild(GameObject parent, string name, Vector2 anchorMin, Vector2 anchorMax, 

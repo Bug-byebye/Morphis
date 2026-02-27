@@ -64,7 +64,7 @@ namespace Morphis.WorldSnapshot
             labelRT.offsetMin = Vector2.zero;
             labelRT.offsetMax = Vector2.zero;
             var tmp = labelGO.AddComponent<TextMeshProUGUI>();
-            tmp.text = "Save";
+            tmp.text = "保存";
             tmp.fontSize = 22;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = Color.white;

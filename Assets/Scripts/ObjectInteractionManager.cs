@@ -110,7 +110,7 @@ public class ObjectInteractionManager : MonoBehaviour
         GameObject titleObj = new GameObject("Title");
         titleObj.transform.SetParent(commentDialog.transform, false);
         var titleText = titleObj.AddComponent<TextMeshProUGUI>();
-        titleText.text = "Add Comment";
+        titleText.text = "添加评论";
         titleText.fontSize = 18;
         titleText.fontStyle = FontStyles.Bold;
         titleText.color = Color.white;
@@ -196,7 +196,7 @@ public class ObjectInteractionManager : MonoBehaviour
         GameObject placeholderObj = new GameObject("Placeholder");
         placeholderObj.transform.SetParent(textArea.transform, false);
         var placeholder = placeholderObj.AddComponent<TextMeshProUGUI>();
-        placeholder.text = "Enter your comment...";
+        placeholder.text = "输入你的评论...";
         placeholder.fontSize = 14;
         placeholder.fontStyle = FontStyles.Italic;
         placeholder.color = new Color(0.5f, 0.5f, 0.5f);
@@ -222,9 +222,9 @@ public class ObjectInteractionManager : MonoBehaviour
         hlg.childControlWidth = true;
         hlg.childForceExpandWidth = true;
         
-        CreateDialogButton(btnsArea.transform, "Save", new Color(0.3f, 0.65f, 0.35f), OnSaveComment);
-        CreateDialogButton(btnsArea.transform, "Delete", new Color(0.7f, 0.3f, 0.3f), OnDeleteComment);
-        CreateDialogButton(btnsArea.transform, "Cancel", new Color(0.5f, 0.5f, 0.55f), OnCancelComment);
+        CreateDialogButton(btnsArea.transform, "保存", new Color(0.3f, 0.65f, 0.35f), OnSaveComment);
+        CreateDialogButton(btnsArea.transform, "删除", new Color(0.7f, 0.3f, 0.3f), OnDeleteComment);
+        CreateDialogButton(btnsArea.transform, "取消", new Color(0.5f, 0.5f, 0.55f), OnCancelComment);
         
         commentDialog.SetActive(false);
     }
