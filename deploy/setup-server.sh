@@ -22,12 +22,19 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# 确定默认部署目录（处理 root 用户的情况）
+if [ "$USER" = "root" ]; then
+    DEFAULT_DEPLOY_DIR="/root/Morphis"
+else
+    DEFAULT_DEPLOY_DIR="/home/$USER/Morphis"
+fi
+
 # 获取配置
 read -p "请输入数据库密码（默认: morphis123）: " DB_PASSWORD
 DB_PASSWORD=${DB_PASSWORD:-morphis123}
 
-read -p "请输入部署目录（默认: /home/$USER/Morphis）: " DEPLOY_DIR
-DEPLOY_DIR=${DEPLOY_DIR:-/home/$USER/Morphis}
+read -p "请输入部署目录（默认: $DEFAULT_DEPLOY_DIR）: " DEPLOY_DIR
+DEPLOY_DIR=${DEPLOY_DIR:-$DEFAULT_DEPLOY_DIR}
 
 echo ""
 echo -e "${GREEN}配置信息：${NC}"
@@ -54,6 +61,8 @@ sudo apt install -y net-tools  # netstat
 
 echo ""
 echo -e "${YELLOW}[3/9] 配置 PostgreSQL...${NC}"
+# 切换到 /tmp 目录避免权限问题
+cd /tmp
 sudo -u postgres psql -c "CREATE DATABASE morphis_db;" 2>/dev/null || echo "数据库已存在"
 sudo -u postgres psql -c "CREATE USER morphis_user WITH PASSWORD '$DB_PASSWORD';" 2>/dev/null || echo "用户已存在"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE morphis_db TO morphis_user;"
@@ -61,6 +70,21 @@ sudo -u postgres psql -c "ALTER DATABASE morphis_db OWNER TO morphis_user;"
 
 echo ""
 echo -e "${YELLOW}[4/9] 准备项目目录...${NC}"
+
+# 智能检测：如果脚本在 deploy 目录下运行，自动使用父目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$SCRIPT_DIR" == */deploy ]]; then
+    AUTO_DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
+    echo "检测到脚本在 deploy 目录下运行"
+    echo "自动检测到项目目录: $AUTO_DEPLOY_DIR"
+    
+    # 如果用户没有修改默认值，使用自动检测的目录
+    if [ "$DEPLOY_DIR" = "$DEFAULT_DEPLOY_DIR" ]; then
+        DEPLOY_DIR="$AUTO_DEPLOY_DIR"
+        echo -e "${GREEN}使用自动检测的目录: $DEPLOY_DIR${NC}"
+    fi
+fi
+
 if [ ! -d "$DEPLOY_DIR" ]; then
     echo -e "${RED}错误：项目目录不存在: $DEPLOY_DIR${NC}"
     echo "请先上传项目代码到服务器，或使用 git clone"
@@ -80,6 +104,15 @@ if [ ! -d "$DEPLOY_DIR" ]; then
         exit 1
     fi
 fi
+
+# 验证目录结构
+if [ ! -d "$DEPLOY_DIR/Backend" ]; then
+    echo -e "${RED}错误：Backend 目录不存在: $DEPLOY_DIR/Backend${NC}"
+    echo "请确保项目结构正确"
+    exit 1
+fi
+
+echo -e "${GREEN}项目目录验证通过: $DEPLOY_DIR${NC}"
 
 cd "$DEPLOY_DIR"
 
