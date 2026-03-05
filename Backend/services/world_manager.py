@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from models.world import World, WorldStatus
 from database import SessionLocal
+from config import get_api_base_url, get_unity_server_config
 import threading
 import logging
 
@@ -43,11 +44,14 @@ class WorldProcessManager:
             return
         
         self._initialized = True
-        self.base_port = 7777
-        self.max_worlds = 50
-        self.idle_timeout_minutes = 5  # 空闲 5 分钟后关闭
-        self.server_executable = os.getenv("UNITY_SERVER_PATH", "/home/morphis/MorphisServer/Morphis.x86_64")
-        self.backend_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+        unity_cfg = get_unity_server_config()
+        self.base_port = int(unity_cfg.get("BasePort", 7777))
+        self.max_worlds = int(unity_cfg.get("MaxWorlds", 50))
+        self.idle_timeout_minutes = int(unity_cfg.get("IdleTimeoutMinutes", 5))
+        self.server_executable = str(
+            unity_cfg.get("ExecutablePath", "/home/morphis/MorphisServer/Morphis.x86_64")
+        )
+        self.backend_url = get_api_base_url()
         
         # 启动后台清理线程
         self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)

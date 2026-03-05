@@ -11,9 +11,6 @@ FastAPI 服务：为 Unity 节点编辑器提供各种 AI 生成 API
 - GET  /health         - 健康检查
 """
 
-from dotenv import load_dotenv
-load_dotenv()  # 加载 .env 文件
-
 from fastapi import FastAPI, Response, File, UploadFile, Form, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -21,6 +18,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 import base64
 import secrets
+from urllib.parse import urlparse
 
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
@@ -29,6 +27,7 @@ from services.dog_chat import ChatRequest, ChatResponse, chat_with_dog, clear_co
 # 导入世界快照路由和数据库初始化
 from routers import world, world_manager
 from database import init_db, get_db
+from config import get_api_base_url, get_server_listen_address, get_server_port
 from crud import get_user_by_username, create_user, get_workspaces_for_user, get_or_create_world, create_workspace_with_coowners
 from models.world import WorldMember
 
@@ -252,8 +251,9 @@ async def join_world(
     if result["status"] == "error":
         return Response(content=result["message"], status_code=500)
     
-    # 获取服务器公网 IP（从环境变量或配置）
-    server_ip = os.getenv("SERVER_PUBLIC_IP", "127.0.0.1")
+    # 获取服务器地址（从 deploy/server-config.json 的 ApiBaseUrl 解析）
+    parsed = urlparse(get_api_base_url())
+    server_ip = parsed.hostname or "127.0.0.1"
     
     return JoinWorldResponse(
         status="ok",
@@ -550,4 +550,4 @@ if __name__ == "__main__":
     print("  POST /image23d         - 图片转 3D")
     print("  POST /text23d          - 文字生成 3D")
     print("=" * 50)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=get_server_listen_address(), port=get_server_port())
