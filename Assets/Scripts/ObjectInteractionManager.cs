@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Morphis.InputControl;
+using Morphis.AppFlow;
+using Morphis.WorldSnapshot;
 
 /// <summary>
 /// 物体交互管理器 - 处理留言输入对话框和悬浮提示
@@ -47,6 +50,7 @@ public class ObjectInteractionManager : MonoBehaviour
         Instance.draggingObject = null;
         if (Instance.commentDialog != null && Instance.commentDialog)
             Instance.commentDialog.SetActive(false);
+        GameplayInputBlocker.SetBlocked(Instance, false);
         if (Instance.tooltipPanel != null && Instance.tooltipPanel)
             Instance.tooltipPanel.SetActive(false);
     }
@@ -402,6 +406,7 @@ public class ObjectInteractionManager : MonoBehaviour
         currentTarget = obj;
         commentInput.text = obj.comment;
         commentDialog.SetActive(true);
+        GameplayInputBlocker.SetBlocked(this, true);
         
         // 隐藏 tooltip
         if (tooltipPanel != null) tooltipPanel.SetActive(false);
@@ -431,6 +436,7 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             currentTarget.SetComment(commentInput.text);
             Debug.Log($"[Interaction] Comment saved: {commentInput.text}");
+            RequestServerAutosave();
         }
         CloseDialog();
     }
@@ -441,6 +447,7 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             currentTarget.ClearComment();
             Debug.Log("[Interaction] Comment deleted");
+            RequestServerAutosave();
         }
         CloseDialog();
     }
@@ -454,7 +461,27 @@ public class ObjectInteractionManager : MonoBehaviour
     {
         Debug.Log($"[Interaction] Closing Dialog. Manager Instance: {GetInstanceID()}");
         commentDialog.SetActive(false);
+        GameplayInputBlocker.SetBlocked(this, false);
         commentInput.text = "";
         currentTarget = null;
+    }
+
+    private void OnDisable()
+    {
+        GameplayInputBlocker.SetBlocked(this, false);
+    }
+
+    private void OnDestroy()
+    {
+        GameplayInputBlocker.SetBlocked(this, false);
+    }
+
+    private static void RequestServerAutosave()
+    {
+        if (!AppSession.IsLoggedIn) return;
+        if (WorldSnapshotManager.Instance == null) return;
+        WorldSnapshotManager.Instance.SaveWorldServer(
+            onError: err => Debug.LogWarning($"[Interaction] Autosave failed after comment edit: {err}")
+        );
     }
 }

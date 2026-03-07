@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -17,6 +18,8 @@ namespace Morphis.Companion
         
         // Session ID for conversation continuity
         private static string sessionId = Guid.NewGuid().ToString();
+        private static int actionCategoryCount = 8;
+        private static readonly Regex ActionTagRegex = new Regex(@"\[\[\s*ACTION\s*:\s*(-?\d+)\s*\]\]", RegexOptions.IgnoreCase);
 
         [Serializable]
         private class ChatRequest
@@ -42,15 +45,30 @@ namespace Morphis.Companion
         /// <param name="onError">Callback if error occurs</param>
         public static void SendMessage(string message, Action<string> onResponse, Action<string> onError = null, string dogName = "Buddy")
         {
+            SendMessage(
+                message,
+                (response, _) => onResponse?.Invoke(response),
+                onError,
+                dogName
+            );
+        }
+
+        /// <summary>
+        /// Send message and optionally receive a model-suggested action category parsed from [[ACTION:N]] tag.
+        /// </summary>
+        public static void SendMessage(string message, Action<string, int?> onResponse, Action<string> onError = null, string dogName = "Buddy")
+        {
             CoroutineRunner.Instance.StartCoroutine(SendMessageCoroutine(message, dogName, onResponse, onError));
         }
 
-        private static IEnumerator SendMessageCoroutine(string message, string dogName, Action<string> onResponse, Action<string> onError)
+        private static IEnumerator SendMessageCoroutine(string message, string dogName, Action<string, int?> onResponse, Action<string> onError)
         {
+            string promptedMessage = BuildMessageWithActionPrompt(message, dogName);
+
             // Create request body
             var request = new ChatRequest
             {
-                message = message,
+                message = promptedMessage,
                 session_id = sessionId,
                 dog_name = dogName
             };
@@ -72,21 +90,59 @@ namespace Morphis.Companion
                     try
                     {
                         var response = JsonUtility.FromJson<ChatResponse>(webRequest.downloadHandler.text);
-                        onResponse?.Invoke(response.response);
+                        var parsed = ParseActionTag(response.response);
+                        onResponse?.Invoke(parsed.cleanText, parsed.actionCategory);
                     }
                     catch (Exception e)
                     {
                         Debug.LogError($"[DogChatAPI] Failed to parse response: {e.Message}");
-                        onResponse?.Invoke(GetPlaceholderResponse(message, dogName));
+                        onResponse?.Invoke(GetPlaceholderResponse(message, dogName), null);
                     }
                 }
                 else
                 {
                     Debug.LogWarning($"[DogChatAPI] Request failed: {webRequest.error}. Using placeholder response.");
                     // Fallback to placeholder response
-                    onResponse?.Invoke(GetPlaceholderResponse(message, dogName));
+                    onResponse?.Invoke(GetPlaceholderResponse(message, dogName), null);
                 }
             }
+        }
+
+        private static string BuildMessageWithActionPrompt(string userMessage, string dogName)
+        {
+            int maxCategory = Mathf.Max(1, actionCategoryCount);
+            var sb = new StringBuilder();
+            sb.AppendLine($"你是一只名字叫 {dogName} 的狗，用可爱、自然的语气聊天。");
+            sb.AppendLine($"回复末尾必须追加动作标签，格式严格为 [[ACTION:N]]。N 的范围是 0 到 {maxCategory}。");
+            sb.AppendLine("如果不需要动作，返回 [[ACTION:0]]。不要输出任何解释该标签规则的内容。");
+            sb.AppendLine();
+            sb.AppendLine($"用户消息：{userMessage}");
+            return sb.ToString();
+        }
+
+        private static (string cleanText, int? actionCategory) ParseActionTag(string responseText)
+        {
+            if (string.IsNullOrWhiteSpace(responseText))
+            {
+                return (string.Empty, null);
+            }
+
+            Match m = ActionTagRegex.Match(responseText);
+            if (!m.Success)
+            {
+                return (responseText.Trim(), null);
+            }
+
+            int parsedAction = 0;
+            int.TryParse(m.Groups[1].Value, out parsedAction);
+
+            string clean = ActionTagRegex.Replace(responseText, "").Trim();
+            if (parsedAction <= 0)
+            {
+                return (clean, null);
+            }
+
+            return (clean, parsedAction);
         }
 
         /// <summary>
@@ -158,6 +214,15 @@ namespace Morphis.Companion
         public static void SetApiUrl(string url)
         {
             apiUrl = url;
+        }
+
+        /// <summary>
+        /// Set count of valid action categories expected from the model.
+        /// Model should return category in [1..count], or 0 for no action.
+        /// </summary>
+        public static void SetActionCategoryCount(int count)
+        {
+            actionCategoryCount = Mathf.Max(1, count);
         }
     }
 

@@ -3,20 +3,25 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Morphis.VoiceRecognition;
 using Morphis.InputControl;
 
 namespace Morphis.Companion
 {
     /// <summary>
-    /// Chat UI panel for talking to the dog companion.
-    /// Creates UI at runtime - no prefab needed.
+    /// 带语音识别功能的狗狗聊天UI
+    /// 按住麦克风按钮说话，松开自动识别并发送
     /// </summary>
-    public class DogChatUI : MonoBehaviour
+    public class DogChatUIWithVoice : MonoBehaviour
     {
         [Header("Settings")]
         [SerializeField] private string dogName = "Buddy";
         [SerializeField] private Color userMessageColor = new Color(0.2f, 0.6f, 1f);
         [SerializeField] private Color dogMessageColor = new Color(0.9f, 0.7f, 0.3f);
+        [SerializeField] private Color systemMessageColor = new Color(0.7f, 0.7f, 0.7f);
+        
+        [Header("Voice Recognition")]
+        [SerializeField] private bool enableVoiceRecognition = true;
 
         // UI References (created at runtime)
         private GameObject chatPanel;
@@ -25,18 +30,70 @@ namespace Morphis.Companion
         private TMP_InputField inputField;
         private Button sendButton;
         private Button closeButton;
+        private Button micButton;
+        private Image micButtonImage;
+        private TextMeshProUGUI micButtonText;
+        
+        // Voice recognition
+        private WhisperASR whisperASR;
+        private string pendingVoiceApiToken;
 
         private bool isOpen = false;
         private List<GameObject> messageObjects = new List<GameObject>();
+        private Func<string, string> localCommandHandler;
+        private Action<int> modelActionHandler;
 
         public bool IsOpen => isOpen;
         public event Action OnChatOpened;
         public event Action OnChatClosed;
 
+        /// <summary>
+        /// Optional local command handler.
+        /// Return a non-empty string to consume the message locally and skip API call.
+        /// Return null/empty to continue with normal API chat flow.
+        /// </summary>
+        public void SetLocalCommandHandler(Func<string, string> handler)
+        {
+            localCommandHandler = handler;
+        }
+
+        /// <summary>
+        /// Receives parsed action category from model response (e.g. [[ACTION:3]]).
+        /// </summary>
+        public void SetModelActionHandler(Action<int> handler)
+        {
+            modelActionHandler = handler;
+        }
+
         private void Awake()
         {
+            // 创建语音识别组件
+            if (enableVoiceRecognition)
+            {
+                var asrObj = new GameObject("WhisperASR");
+                asrObj.transform.SetParent(transform);
+                whisperASR = asrObj.AddComponent<WhisperASR>();
+
+                if (!string.IsNullOrWhiteSpace(pendingVoiceApiToken))
+                {
+                    whisperASR.SetApiToken(pendingVoiceApiToken);
+                }
+            }
+            
             CreateUI();
             chatPanel.SetActive(false);
+        }
+
+        /// <summary>
+        /// Configure Hugging Face token used by Whisper ASR.
+        /// </summary>
+        public void ConfigureVoiceApiToken(string token)
+        {
+            pendingVoiceApiToken = token == null ? string.Empty : token.Trim();
+            if (whisperASR != null)
+            {
+                whisperASR.SetApiToken(pendingVoiceApiToken);
+            }
         }
 
         private void Update()
@@ -52,6 +109,12 @@ namespace Morphis.Companion
             {
                 Close();
             }
+            
+            // 更新麦克风按钮状态
+            if (enableVoiceRecognition && whisperASR != null && micButton != null)
+            {
+                UpdateMicButtonVisual();
+            }
         }
 
         public void Open()
@@ -64,7 +127,6 @@ namespace Morphis.Companion
             inputField.Select();
             inputField.ActivateInputField();
             
-            // Unlock cursor for UI interaction
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             GameplayInputBlocker.SetBlocked(this, true);
@@ -75,6 +137,12 @@ namespace Morphis.Companion
         public void Close()
         {
             if (!isOpen) return;
+            
+            // 停止录音（如果正在录音）
+            if (enableVoiceRecognition && whisperASR != null && whisperASR.IsRecording)
+            {
+                StopRecording();
+            }
             
             isOpen = false;
             chatPanel.SetActive(false);
@@ -104,20 +172,56 @@ namespace Morphis.Companion
             string userMessage = inputField.text.Trim();
             if (string.IsNullOrEmpty(userMessage)) return;
 
+            SendUserMessage(userMessage);
+        }
+        
+        private void SendUserMessage(string message)
+        {
             // Display user message
-            AddMessage("你", userMessage, userMessageColor);
+            AddMessage("你", message, userMessageColor);
             inputField.text = "";
             inputField.ActivateInputField();
+
+            // Try local command first (e.g. 动作1 / action1)
+            if (localCommandHandler != null)
+            {
+                string localResponse = null;
+                try
+                {
+                    localResponse = localCommandHandler.Invoke(message);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[DogChatUI] Local command handler failed: {e.Message}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(localResponse))
+                {
+                    AddMessage(dogName, localResponse, dogMessageColor);
+                    return;
+                }
+            }
 
             // Show typing indicator
             var typingMsg = AddMessage(dogName, "...", dogMessageColor);
 
             // Call API
-            DogChatAPI.SendMessage(userMessage, 
-                response => {
-                    // Remove typing indicator and show response
+            DogChatAPI.SendMessage(message, 
+                (response, actionCategory) => {
                     if (typingMsg != null) Destroy(typingMsg);
                     AddMessage(dogName, response, dogMessageColor);
+
+                    if (actionCategory.HasValue && modelActionHandler != null)
+                    {
+                        try
+                        {
+                            modelActionHandler.Invoke(actionCategory.Value);
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogError($"[DogChatUI] Model action handler failed: {e.Message}");
+                        }
+                    }
                 },
                 error => {
                     if (typingMsg != null) Destroy(typingMsg);
@@ -126,10 +230,91 @@ namespace Morphis.Companion
                 }
             );
         }
+        
+        /// <summary>
+        /// 麦克风按钮按下 - 开始录音
+        /// </summary>
+        public void OnMicButtonDown()
+        {
+            if (!enableVoiceRecognition || whisperASR == null) return;
+            
+            if (whisperASR.IsRecording)
+            {
+                Debug.LogWarning("[DogChatUI] 已经在录音中");
+                return;
+            }
+            
+            AddMessage("系统", "开始录音... (松开按钮停止)", systemMessageColor);
+            whisperASR.StartRecording();
+        }
+        
+        /// <summary>
+        /// 麦克风按钮松开 - 停止录音并识别
+        /// </summary>
+        public void OnMicButtonUp()
+        {
+            if (!enableVoiceRecognition || whisperASR == null) return;
+            
+            if (!whisperASR.IsRecording)
+            {
+                return;
+            }
+            
+            StopRecording();
+        }
+        
+        private void StopRecording()
+        {
+            var processingMsg = AddMessage("系统", "正在识别语音...", systemMessageColor);
+            
+            whisperASR.StopRecordingAndRecognize(
+                recognizedText => {
+                    // 移除处理消息
+                    if (processingMsg != null) Destroy(processingMsg);
+                    
+                    if (!string.IsNullOrEmpty(recognizedText))
+                    {
+                        // 发送识别的文本
+                        SendUserMessage(recognizedText);
+                    }
+                    else
+                    {
+                        AddMessage("系统", "没有识别到语音，请重试", systemMessageColor);
+                    }
+                },
+                error => {
+                    if (processingMsg != null) Destroy(processingMsg);
+                    string shortError = error;
+                    if (!string.IsNullOrEmpty(shortError) && shortError.Length > 180)
+                    {
+                        shortError = shortError.Substring(0, 180) + "...";
+                    }
+
+                    AddMessage("系统", $"识别失败: {shortError}", systemMessageColor);
+                    Debug.LogError($"[DogChatUI] 语音识别失败: {error}");
+                }
+            );
+        }
+        
+        private void UpdateMicButtonVisual()
+        {
+            if (whisperASR.IsRecording)
+            {
+                // 录音中 - 红色闪烁
+                float pulse = (Mathf.Sin(Time.time * 4f) + 1f) * 0.5f;
+                micButtonImage.color = Color.Lerp(new Color(0.8f, 0.2f, 0.2f), Color.red, pulse);
+                micButtonText.text = "Stop";
+            }
+            else
+            {
+                // 待机 - 蓝色
+                micButtonImage.color = new Color(0.3f, 0.5f, 0.8f);
+                micButtonText.text = "Mic";
+            }
+        }
 
         private GameObject AddMessage(string sender, string message, Color color)
         {
-            // Create message text
             var msgObj = new GameObject("Message");
             msgObj.transform.SetParent(contentRect, false);
 
@@ -147,7 +332,6 @@ namespace Morphis.Companion
 
             messageObjects.Add(msgObj);
 
-            // Scroll to bottom
             Canvas.ForceUpdateCanvases();
             scrollRect.verticalNormalizedPosition = 0f;
 
@@ -181,7 +365,6 @@ namespace Morphis.Companion
             var panelImage = chatPanel.AddComponent<Image>();
             panelImage.color = new Color(0.1f, 0.1f, 0.15f, 0.95f);
 
-            // Add rounded corners effect (simple)
             var panelOutline = chatPanel.AddComponent<Outline>();
             panelOutline.effectColor = new Color(0.3f, 0.3f, 0.4f);
             panelOutline.effectDistance = new Vector2(2, 2);
@@ -207,10 +390,6 @@ namespace Morphis.Companion
             closeBtnImage.color = new Color(0.8f, 0.3f, 0.3f);
             closeButton = closeBtnObj.AddComponent<Button>();
             closeButton.onClick.AddListener(Close);
-            
-            // Note: Removed the "X" text because TextMeshPro was having missing font
-            // issues (the ✕ character missing from fallback). A solid red square is 
-            // a clear enough close button indicator in this stylized UI.
 
             // Messages scroll area
             var scrollArea = CreateChild(chatPanel, "ScrollArea", new Vector2(0, 0), new Vector2(1, 1),
@@ -239,13 +418,48 @@ namespace Morphis.Companion
             scrollRect.vertical = true;
             scrollRect.horizontal = false;
 
-            // Input area
+            // Input area (with mic button)
             var inputArea = CreateChild(chatPanel, "InputArea", new Vector2(0, 0), new Vector2(1, 0),
                 new Vector2(0, 30), new Vector2(-20, 50));
             inputArea.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, 30);
 
+            // Microphone button (if enabled)
+            float inputWidth = enableVoiceRecognition ? 0.65f : 0.8f;
+            
+            if (enableVoiceRecognition)
+            {
+                var micBtnObj = CreateChild(inputArea, "MicButton", new Vector2(0, 0), new Vector2(0.15f, 1),
+                    Vector2.zero, Vector2.zero);
+                var micRect = micBtnObj.GetComponent<RectTransform>();
+                micRect.anchoredPosition = new Vector2(5, 0);
+                micRect.sizeDelta = new Vector2(-10, 0);
+
+                micButtonImage = micBtnObj.AddComponent<Image>();
+                micButtonImage.color = new Color(0.3f, 0.5f, 0.8f);
+                micButton = micBtnObj.AddComponent<Button>();
+                
+                // 添加EventTrigger以支持按住和松开
+                var eventTrigger = micBtnObj.AddComponent<UnityEngine.EventSystems.EventTrigger>();
+                
+                var pointerDownEntry = new UnityEngine.EventSystems.EventTrigger.Entry();
+                pointerDownEntry.eventID = UnityEngine.EventSystems.EventTriggerType.PointerDown;
+                pointerDownEntry.callback.AddListener((data) => { OnMicButtonDown(); });
+                eventTrigger.triggers.Add(pointerDownEntry);
+                
+                var pointerUpEntry = new UnityEngine.EventSystems.EventTrigger.Entry();
+                pointerUpEntry.eventID = UnityEngine.EventSystems.EventTriggerType.PointerUp;
+                pointerUpEntry.callback.AddListener((data) => { OnMicButtonUp(); });
+                eventTrigger.triggers.Add(pointerUpEntry);
+                
+                micButtonText = CreateTextChild(micBtnObj, "Text", "Mic");
+                micButtonText.alignment = TextAlignmentOptions.Center;
+                micButtonText.fontSize = 28;
+            }
+
             // Input field
-            var inputObj = CreateChild(inputArea, "InputField", new Vector2(0, 0), new Vector2(0.8f, 1),
+            var inputObj = CreateChild(inputArea, "InputField", 
+                new Vector2(enableVoiceRecognition ? 0.17f : 0f, 0), 
+                new Vector2(enableVoiceRecognition ? 0.17f + inputWidth : inputWidth, 1),
                 Vector2.zero, Vector2.zero);
             var inputRect = inputObj.GetComponent<RectTransform>();
             inputRect.anchoredPosition = new Vector2(5, 0);
@@ -264,7 +478,7 @@ namespace Morphis.Companion
             inputTextRect.anchorMax = Vector2.one;
             inputTextRect.sizeDelta = new Vector2(-10, 0);
 
-            var placeholder = CreateTextChild(inputObj, "Placeholder", "输入消息...");
+            var placeholder = CreateTextChild(inputObj, "Placeholder", "输入消息或按住麦克风说话...");
             placeholder.color = new Color(0.5f, 0.5f, 0.5f);
             placeholder.fontStyle = FontStyles.Italic;
             inputField.placeholder = placeholder;
@@ -273,7 +487,6 @@ namespace Morphis.Companion
             phRect.anchorMax = Vector2.one;
             phRect.sizeDelta = new Vector2(-10, 0);
 
-            // Text area for input
             var textArea = new GameObject("TextArea");
             textArea.transform.SetParent(inputObj.transform, false);
             var textAreaRect = textArea.AddComponent<RectTransform>();
@@ -285,7 +498,9 @@ namespace Morphis.Companion
             inputField.textViewport = textAreaRect;
 
             // Send button
-            var sendBtnObj = CreateChild(inputArea, "SendButton", new Vector2(0.82f, 0), new Vector2(1, 1),
+            var sendBtnObj = CreateChild(inputArea, "SendButton", 
+                new Vector2(enableVoiceRecognition ? 0.84f : 0.82f, 0), 
+                new Vector2(1, 1),
                 Vector2.zero, Vector2.zero);
             var sendRect = sendBtnObj.GetComponent<RectTransform>();
             sendRect.anchoredPosition = new Vector2(-5, 0);
@@ -301,6 +516,11 @@ namespace Morphis.Companion
 
             // Add welcome message
             AddMessage(dogName, $"*摇尾巴* 汪！你好呀！我是{dogName}！", dogMessageColor);
+            
+            if (enableVoiceRecognition)
+            {
+                AddMessage("系统", "提示: 按住麦克风按钮说话，松开自动识别", systemMessageColor);
+            }
         }
 
         private GameObject CreateChild(GameObject parent, string name, Vector2 anchorMin, Vector2 anchorMax, 

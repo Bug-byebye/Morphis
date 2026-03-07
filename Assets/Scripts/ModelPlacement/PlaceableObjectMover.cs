@@ -1,5 +1,8 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using System.Collections;
+using Morphis.AppFlow;
+using Morphis.WorldSnapshot;
 
 namespace Morphis.ModelPlacement
 {
@@ -17,13 +20,21 @@ namespace Morphis.ModelPlacement
         private Collider[] _colliders;
         // private Vector3 _dragOffset; // Removed to ensure center alignment
         
+        private enum EditMode { None, Move, Rotate, Scale }
+        private EditMode _currentMode = EditMode.None;
+        
         private Transform _playerTransform;
-        private bool _moveMode = false;
         private bool _dragging = false; 
+        
+        private Vector2 _lastMousePos;
+        private Vector3 _initialEulerAngles;
+        private Vector3 _initialScale;
+        private Vector3 _initialPosition;
 
         private void Awake()
         {
             _cam = Camera.main;
+            EnsureColliderExists();
             _colliders = GetComponentsInChildren<Collider>();
             FindPlayer();
         }
@@ -40,6 +51,8 @@ namespace Morphis.ModelPlacement
                 if (controller != null) _playerTransform = controller.transform;
             }
         }
+
+        private bool _waitForMouseRelease = false;
 
         private void Update()
         {
@@ -66,17 +79,38 @@ namespace Morphis.ModelPlacement
                 if (blockedByUI) return;
             }
 
-            // Mode 1: Moving (Dragging)
-            if (_moveMode)
+            // Waiting for the user to release the mouse after clicking a menu button
+            if (_waitForMouseRelease)
+            {
+                if (Input.GetMouseButtonUp(0))
+                {
+                    _waitForMouseRelease = false;
+                }
+                return;
+            }
+
+            // Cancel with ESC
+            if (_currentMode != EditMode.None && Input.GetKeyDown(KeyCode.Escape))
+            {
+                CancelEdit();
+                return;
+            }
+
+            if (_currentMode == EditMode.Move)
             {
                 UpdateDrag();
-
-                if (Input.GetMouseButtonDown(0))
-                {
-                    TryPlace();
-                }
+                if (Input.GetMouseButtonDown(0)) TryPlace();
             }
-            // Mode 2: Idle (Click to show menu)
+            else if (_currentMode == EditMode.Rotate)
+            {
+                UpdateRotate();
+                if (Input.GetMouseButtonDown(0)) TryPlace();
+            }
+            else if (_currentMode == EditMode.Scale)
+            {
+                UpdateScale();
+                if (Input.GetMouseButtonDown(0)) TryPlace();
+            }
             else
             {
                 if (Input.GetMouseButtonDown(0))
@@ -97,37 +131,115 @@ namespace Morphis.ModelPlacement
             {
                 if (IsHitSelf(hit.collider))
                 {
-                    if (ObjectContextMenu.Instance != null)
+                    if (ObjectContextMenu.Instance == null)
                     {
-                        ObjectContextMenu.Instance.ShowMenu(
-                            gameObject,
-                            onMoveSelected: EnterMoveMode,
-                            onMessageSelected: ShowMessageDialog
-                        );
+                        var menuObj = new GameObject("ObjectContextMenu");
+                        menuObj.AddComponent<ObjectContextMenu>();
                     }
+                    if (ObjectContextMenu.Instance == null) return;
+
+                    ObjectContextMenu.Instance.ShowMenu(
+                        gameObject,
+                        onMoveSelected: EnterMoveMode,
+                        onRotateSelected: EnterRotateMode,
+                        onScaleSelected: EnterScaleMode,
+                        onMessageSelected: ShowMessageDialog,
+                        onDeleteSelected: DeleteObject
+                    );
                 }
             }
         }
 
         public void EnterMoveMode()
         {
-            _moveMode = true;
+            _currentMode = EditMode.Move;
+            _initialPosition = transform.position;
             _dragging = true;
+            _waitForMouseRelease = true;
             SetCollidersEnabled(false);
-            
-            // We want snappier controls, so snapping center to mouse immediately
-            // _dragOffset = Vector3.zero; 
             
             FindPlayer(); // Ensure we have player ref
             Debug.Log($"[PlaceableObjectMover] Entered Move Mode for {name}");
         }
 
-        private void TryPlace()
+        public void EnterRotateMode()
         {
-            _moveMode = false;
+            _currentMode = EditMode.Rotate;
+            _initialEulerAngles = transform.eulerAngles;
+            _lastMousePos = Input.mousePosition;
+            _waitForMouseRelease = true;
+            SetCollidersEnabled(false);
+            Debug.Log($"[PlaceableObjectMover] Entered Rotate Mode for {name}");
+        }
+
+        public void EnterScaleMode()
+        {
+            _currentMode = EditMode.Scale;
+            _initialScale = transform.localScale;
+            _lastMousePos = Input.mousePosition;
+            _waitForMouseRelease = true;
+            SetCollidersEnabled(false);
+            Debug.Log($"[PlaceableObjectMover] Entered Scale Mode for {name}");
+        }
+
+        private void CancelEdit()
+        {
+            if (_currentMode == EditMode.Move) transform.position = _initialPosition;
+            else if (_currentMode == EditMode.Rotate) transform.eulerAngles = _initialEulerAngles;
+            else if (_currentMode == EditMode.Scale) transform.localScale = _initialScale;
+            
+            _currentMode = EditMode.None;
             _dragging = false;
             SetCollidersEnabled(true);
-            Debug.Log($"[PlaceableObjectMover] Placed {name}");
+            Debug.Log($"[PlaceableObjectMover] Cancelled edit for {name}");
+        }
+
+        private void TryPlace()
+        {
+            _currentMode = EditMode.None;
+            _dragging = false;
+            SetCollidersEnabled(true);
+            Debug.Log($"[PlaceableObjectMover] Placed/Confirmed {name}");
+        }
+
+        private void UpdateRotate()
+        {
+            Vector2 currentMousePos = Input.mousePosition;
+            float deltaX = currentMousePos.x - _lastMousePos.x;
+            float scrollDelta = Input.mouseScrollDelta.y;
+            
+            float rotationAmount = (deltaX * -0.5f) + (scrollDelta * 10f);
+            
+            if (Mathf.Abs(rotationAmount) > 0.01f)
+            {
+                transform.Rotate(Vector3.up, rotationAmount, Space.World);
+            }
+            _lastMousePos = currentMousePos;
+        }
+
+        private void UpdateScale()
+        {
+            Vector2 currentMousePos = Input.mousePosition;
+            float deltaY = currentMousePos.y - _lastMousePos.y;
+            float scrollDelta = Input.mouseScrollDelta.y;
+            
+            float scaleMultiplier = 1f + (deltaY * 0.005f) + (scrollDelta * 0.1f);
+            
+            if (Mathf.Abs(scaleMultiplier - 1f) > 0.001f)
+            {
+                Vector3 newScale = transform.localScale * scaleMultiplier;
+                
+                // Clamp scale to reasonable values
+                float minScale = 0.1f;
+                float maxScale = 10f;
+                
+                newScale.x = Mathf.Clamp(newScale.x, minScale, maxScale);
+                newScale.y = Mathf.Clamp(newScale.y, minScale, maxScale);
+                newScale.z = Mathf.Clamp(newScale.z, minScale, maxScale);
+                
+                transform.localScale = newScale;
+            }
+            _lastMousePos = currentMousePos;
         }
 
         private void ShowMessageDialog()
@@ -155,6 +267,33 @@ namespace Morphis.ModelPlacement
             {
                 Debug.LogError("[PlaceableObjectMover] Failed to open message dialog.");
             }
+        }
+
+        private void DeleteObject()
+        {
+            if (ObjectInteractionManager.Instance != null)
+                ObjectInteractionManager.ClearTargetsIfExists();
+
+            Debug.Log($"[PlaceableObjectMover] Deleted {name}");
+            Destroy(gameObject);
+            RequestServerAutosaveNextFrame();
+        }
+
+        private static void RequestServerAutosaveNextFrame()
+        {
+            if (!AppSession.IsLoggedIn) return;
+            if (WorldSnapshotManager.Instance == null) return;
+            WorldSnapshotManager.Instance.StartCoroutine(SaveAfterDeleteCoroutine(WorldSnapshotManager.Instance));
+        }
+
+        private static IEnumerator SaveAfterDeleteCoroutine(WorldSnapshotManager manager)
+        {
+            // Destroy() happens at end of frame; wait one frame to ensure snapshot no longer includes this object.
+            yield return null;
+            if (manager == null) yield break;
+            manager.SaveWorldServer(
+                onError: err => Debug.LogWarning($"[PlaceableObjectMover] Autosave failed after delete: {err}")
+            );
         }
 
         private void UpdateDrag()
@@ -235,6 +374,32 @@ namespace Morphis.ModelPlacement
         private bool IsHitSelf(Collider c)
         {
             return c.transform == transform || c.transform.IsChildOf(transform);
+        }
+
+        private void EnsureColliderExists()
+        {
+            if (GetComponentInChildren<Collider>() != null) return;
+
+            var renderers = GetComponentsInChildren<Renderer>();
+            if (renderers == null || renderers.Length == 0)
+            {
+                gameObject.AddComponent<BoxCollider>();
+                return;
+            }
+
+            var bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            var box = gameObject.AddComponent<BoxCollider>();
+            var centerLocal = transform.InverseTransformPoint(bounds.center);
+            box.center = centerLocal;
+            var ls = transform.lossyScale;
+            box.size = new Vector3(
+                ls.x != 0 ? bounds.size.x / ls.x : bounds.size.x,
+                ls.y != 0 ? bounds.size.y / ls.y : bounds.size.y,
+                ls.z != 0 ? bounds.size.z / ls.z : bounds.size.z
+            );
         }
 
         private void SetCollidersEnabled(bool enabled)

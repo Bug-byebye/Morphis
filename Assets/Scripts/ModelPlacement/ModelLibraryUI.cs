@@ -377,7 +377,7 @@ namespace Morphis.ModelPlacement
             NormalizeScale(root, targetSize: 1.0f);
             SnapToGround(root, targetBaseY);
             EnsurePlaceableComponents(root);
-            EnsureWorldObjectForSnapshot(root, $"glb:{displayName}");
+            EnsureWorldObjectForSnapshot(root, $"{resourcesPath}/{displayName}");
 
             Debug.Log($"[ModelLibrary] Placed GLB: {displayName} at {worldPos}");
         }
@@ -745,4 +745,3 @@ namespace Morphis.ModelPlacement
         }
     }
 }
-

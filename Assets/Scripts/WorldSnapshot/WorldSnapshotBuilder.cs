@@ -46,7 +46,7 @@ namespace Morphis.WorldSnapshot
         }
 
         /// <summary>
-        /// 为所有带 PlaceableObjectMover 且无 WorldObject 的物体添加 WorldObject（prefab_id 用 glb:名称），以便被保存
+        /// 为所有带 PlaceableObjectMover 且无 WorldObject 的物体添加 WorldObject，以便被保存
         /// </summary>
         private static void EnsureWorldObjectOnPlaceables()
         {
@@ -72,7 +72,7 @@ namespace Morphis.WorldSnapshot
                 if (wo == null)
                 {
                     wo = parent.gameObject.AddComponent<WorldObject>();
-                    wo.PrefabId = "glb:" + parent.gameObject.name;
+                    wo.PrefabId = $"Placeables/{parent.gameObject.name}";
                 }
             }
             for (int i = 0; i < parent.childCount; i++)
@@ -87,6 +87,12 @@ namespace Morphis.WorldSnapshot
             if (go == null || string.IsNullOrEmpty(prefabId)) return;
             var wo = go.GetComponent<WorldObject>();
             if (wo == null) wo = go.AddComponent<WorldObject>();
+            // 兼容旧格式：glb:XXX 统一改为 Placeables/XXX，便于重载与后续保存
+            if (prefabId.StartsWith("glb:"))
+            {
+                var name = prefabId.Substring("glb:".Length);
+                prefabId = string.IsNullOrEmpty(name) ? prefabId : $"Placeables/{name}";
+            }
             wo.PrefabId = prefabId;
         }
 

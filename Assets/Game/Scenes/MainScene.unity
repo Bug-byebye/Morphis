@@ -6740,6 +6740,7 @@ MonoBehaviour:
   walkAnimId: 1
   runAnimId: 3
   dogName: Buddy
+  huggingFaceApiToken: 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
 --- !u!195 &846381275
 NavMeshAgent:
   m_ObjectHideFlags: 0

@@ -1,8 +1,10 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Morphis.ModelPlacement;
+using GLTFast;
 
 namespace Morphis.WorldSnapshot
 {
@@ -11,6 +13,18 @@ namespace Morphis.WorldSnapshot
     /// </summary>
     public static class WorldSnapshotApplier
     {
+        private sealed class SnapshotCoroutineHost : MonoBehaviour { }
+        private static SnapshotCoroutineHost _coroutineHost;
+
+        private static SnapshotCoroutineHost GetCoroutineHost()
+        {
+            if (_coroutineHost != null) return _coroutineHost;
+            var go = new GameObject("WorldSnapshotCoroutineHost");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            _coroutineHost = go.AddComponent<SnapshotCoroutineHost>();
+            return _coroutineHost;
+        }
+
         /// <summary>
         /// 应用世界快照到当前场景
         /// </summary>
@@ -60,26 +74,17 @@ namespace Morphis.WorldSnapshot
                     continue;
                 }
 
-                GameObject instance = null;
+                var normalizedPrefabId = NormalizePrefabId(objData.prefab_id);
 
                 // primitive:XXX 由本处创建（与 ModelLibrary/HotBar 放置时 prefab_id 一致）
-                if (objData.prefab_id.StartsWith("primitive:"))
+                if (normalizedPrefabId.StartsWith("primitive:"))
                 {
-                    var typeStr = objData.prefab_id.Substring("primitive:".Length);
+                    var typeStr = normalizedPrefabId.Substring("primitive:".Length);
                     if (Enum.TryParse<PrimitiveType>(typeStr, true, out var primitiveType))
                     {
-                        instance = GameObject.CreatePrimitive(primitiveType);
+                        var instance = GameObject.CreatePrimitive(primitiveType);
                         instance.name = typeStr;
-                        if (parent != null) instance.transform.SetParent(parent);
-                        instance.transform.position = objData.position;
-                        instance.transform.rotation = objData.rotation;
-                        instance.transform.localScale = objData.scale;
-                        if (instance.GetComponent<PlaceableObjectMover>() == null) instance.AddComponent<PlaceableObjectMover>();
-                        if (instance.GetComponent<InteractableObject>() == null) instance.AddComponent<InteractableObject>();
-                        var wo = instance.GetComponent<WorldObject>();
-                        if (wo == null) wo = instance.AddComponent<WorldObject>();
-                        wo.PrefabId = objData.prefab_id;
-                        wo.ApplyData(objData);
+                        ApplyObjectData(instance, objData, normalizedPrefabId, parent);
                         successCount++;
                     }
                     else
@@ -90,45 +95,144 @@ namespace Morphis.WorldSnapshot
                     continue;
                 }
 
-                var prefab = PrefabRegistryManager.GetPrefab(objData.prefab_id);
-                if (prefab == null)
+                var prefab = PrefabRegistryManager.GetPrefab(normalizedPrefabId);
+                if (prefab != null)
                 {
-                    // glb: 等暂无法从本地恢复，仅记录
-                    Debug.LogWarning($"[WorldSnapshotApplier] Prefab not found for id: {objData.prefab_id}, object_id: {objData.object_id}");
-                    failCount++;
+                    // 实例化 Prefab
+                    var instance = UnityEngine.Object.Instantiate(prefab, parent);
+                    instance.name = prefab.name; // 保持 Prefab 名称
+                    ApplyObjectData(instance, objData, normalizedPrefabId, null);
+                    successCount++;
                     continue;
                 }
 
-                // 实例化 Prefab
-                instance = UnityEngine.Object.Instantiate(prefab, parent);
-                instance.name = prefab.name; // 保持 Prefab 名称
-
-                // 应用 Transform 数据
-                instance.transform.position = objData.position;
-                instance.transform.rotation = objData.rotation;
-                instance.transform.localScale = objData.scale;
-
-                // 恢复后可移动、可留言（与放置时 EnsurePlaceableComponents 一致）
-                if (instance.GetComponent<PlaceableObjectMover>() == null) instance.AddComponent<PlaceableObjectMover>();
-                if (instance.GetComponent<InteractableObject>() == null) instance.AddComponent<InteractableObject>();
-
-                // 确保有 WorldObject 组件并应用数据
-                var worldObj = instance.GetComponent<WorldObject>();
-                if (worldObj == null)
+                var glbAsset = ResolveGlbAsset(normalizedPrefabId);
+                if (glbAsset != null)
                 {
-                    Debug.LogWarning($"[WorldSnapshotApplier] Prefab '{objData.prefab_id}' has no WorldObject component. Adding it...");
-                    worldObj = instance.AddComponent<WorldObject>();
+                    GetCoroutineHost().StartCoroutine(InstantiateGlbAndApply(glbAsset, objData, normalizedPrefabId, parent));
+                    successCount++;
+                    continue;
                 }
 
-                worldObj.PrefabId = objData.prefab_id;
-                worldObj.ApplyData(objData);
-
-                successCount++;
+                Debug.LogWarning($"[WorldSnapshotApplier] Prefab/GLB not found for id: {objData.prefab_id}, object_id: {objData.object_id}");
+                failCount++;
             }
 
             Debug.Log($"[WorldSnapshotApplier] Applied snapshot: {successCount} success, {failCount} failed");
 
             return successCount;
+        }
+
+        private static string NormalizePrefabId(string prefabId)
+        {
+            if (string.IsNullOrEmpty(prefabId)) return prefabId;
+
+            if (prefabId.StartsWith("glb:"))
+            {
+                var name = prefabId.Substring("glb:".Length);
+                if (!string.IsNullOrEmpty(name))
+                    return $"Placeables/{name}";
+            }
+
+            return prefabId;
+        }
+
+        private static TextAsset ResolveGlbAsset(string prefabId)
+        {
+            if (string.IsNullOrEmpty(prefabId)) return null;
+            // 支持直接用 Placeables/XXX 或 legacy glb:XXX（已在 NormalizePrefabId 转成 Placeables/XXX）
+            var asset = Resources.Load<TextAsset>(prefabId);
+            if (asset != null) return asset;
+
+            // 兼容旧 fallback：prefab_id 只有名称时，尝试按 Placeables/名称 加载
+            if (!prefabId.Contains("/"))
+                return Resources.Load<TextAsset>($"Placeables/{prefabId}");
+
+            return null;
+        }
+
+        private static IEnumerator InstantiateGlbAndApply(TextAsset glbAsset, WorldObjectData objData, string prefabId, Transform parent)
+        {
+            if (glbAsset == null) yield break;
+
+            var root = new GameObject(glbAsset.name);
+            if (parent != null) root.transform.SetParent(parent, false);
+
+            var gltf = new GltfImport();
+            var loadTask = gltf.LoadGltfBinary(glbAsset.bytes);
+            while (!loadTask.IsCompleted) yield return null;
+            if (!loadTask.Result)
+            {
+                Debug.LogWarning($"[WorldSnapshotApplier] Failed to load GLB bytes: {prefabId}");
+                UnityEngine.Object.Destroy(root);
+                yield break;
+            }
+
+            var instTask = gltf.InstantiateMainSceneAsync(root.transform);
+            while (!instTask.IsCompleted) yield return null;
+            if (!instTask.Result)
+            {
+                Debug.LogWarning($"[WorldSnapshotApplier] Failed to instantiate GLB scene: {prefabId}");
+                UnityEngine.Object.Destroy(root);
+                yield break;
+            }
+
+            EnsureColliderFromRenderers(root);
+            ApplyObjectData(root, objData, prefabId, null);
+        }
+
+        private static void ApplyObjectData(GameObject instance, WorldObjectData objData, string prefabId, Transform parentIfNeeded)
+        {
+            if (instance == null) return;
+            if (parentIfNeeded != null) instance.transform.SetParent(parentIfNeeded, false);
+
+            instance.transform.position = objData.position;
+            instance.transform.rotation = objData.rotation;
+            instance.transform.localScale = objData.scale;
+
+            // 一些资源本身无 Collider。放置流程会补，这里重载也要补，避免“看得到但点不到”。
+            EnsureColliderFromRenderers(instance);
+
+            // 恢复后可移动、可留言（与放置时 EnsurePlaceableComponents 一致）
+            if (instance.GetComponent<PlaceableObjectMover>() == null) instance.AddComponent<PlaceableObjectMover>();
+            if (instance.GetComponent<InteractableObject>() == null) instance.AddComponent<InteractableObject>();
+
+            // 确保有 WorldObject 组件并应用数据
+            var worldObj = instance.GetComponent<WorldObject>();
+            if (worldObj == null)
+            {
+                worldObj = instance.AddComponent<WorldObject>();
+            }
+
+            worldObj.PrefabId = prefabId;
+            worldObj.ApplyData(objData);
+        }
+
+        private static void EnsureColliderFromRenderers(GameObject root)
+        {
+            if (root == null) return;
+            if (root.GetComponent<Collider>() != null) return;
+
+            var renderers = root.GetComponentsInChildren<Renderer>();
+            if (renderers == null || renderers.Length == 0)
+            {
+                root.AddComponent<BoxCollider>();
+                return;
+            }
+
+            var bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            var box = root.AddComponent<BoxCollider>();
+            var centerLocal = root.transform.InverseTransformPoint(bounds.center);
+            box.center = centerLocal;
+            var ls = root.transform.lossyScale;
+            box.size = new Vector3(
+                ls.x != 0 ? bounds.size.x / ls.x : bounds.size.x,
+                ls.y != 0 ? bounds.size.y / ls.y : bounds.size.y,
+                ls.z != 0 ? bounds.size.z / ls.z : bounds.size.z
+            );
         }
 
         /// <summary>

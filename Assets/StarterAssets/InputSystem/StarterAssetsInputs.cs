@@ -1,4 +1,5 @@
 using UnityEngine;
+using Morphis.InputControl;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -73,22 +74,51 @@ namespace StarterAssets
 
 		public void MoveInput(Vector2 newMoveDirection)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				move = Vector2.zero;
+				return;
+			}
 			move = newMoveDirection;
 		} 
 
 		public void LookInput(Vector2 newLookDirection)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				look = Vector2.zero;
+				return;
+			}
 			look = newLookDirection;
 		}
 
 		public void JumpInput(bool newJumpState)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				jump = false;
+				return;
+			}
 			jump = newJumpState;
 		}
 
 		public void SprintInput(bool newSprintState)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				sprint = false;
+				return;
+			}
 			sprint = newSprintState;
+		}
+
+		private void Update()
+		{
+			if (!GameplayInputBlocker.IsBlocked) return;
+			move = Vector2.zero;
+			look = Vector2.zero;
+			jump = false;
+			sprint = false;
 		}
 
 		private void OnApplicationFocus(bool hasFocus)

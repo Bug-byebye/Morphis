@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.AI;
+using System.Text.RegularExpressions;
 
 namespace Morphis.Companion
 {
@@ -35,13 +36,24 @@ namespace Morphis.Companion
 
         [Header("Chat")]
         [SerializeField] private string dogName = "Buddy";
+        [Tooltip("Hugging Face token for voice recognition (Whisper). Leave empty to disable voice ASR requests.")]
+        [SerializeField] private string huggingFaceApiToken = "";
+
+        [Header("Action Commands")]
+        [Tooltip("聊天指令可触发的最大动作编号。例如 8 表示支持 动作1~动作8。")]
+        [SerializeField] private int maxActionId = 8;
+        [Tooltip("触发动作后保持该动作的时长（秒）。")]
+        [SerializeField] private float actionCommandDuration = 2f;
 
         private NavMeshAgent _agent;
         private Animator _animator;
         private Vector3 _lastTargetPosition;
         private Vector3 _smoothedMoveDirection;
-        private DogChatUI _chatUI;
+        private DogChatUIWithVoice _chatUI;
         private int _currentAnimId = -1;
+        private bool _isCommandActionActive;
+        private float _commandActionEndTime;
+        private int _commandActionAnimId = -1;
         private static readonly int AnimationIDHash = Animator.StringToHash("AnimationID");
 
         private void Awake()
@@ -97,8 +109,14 @@ namespace Morphis.Companion
                     "The dog will not animate. Make sure the dog model has an Animator component with Dog_Animator_Controler assigned.");
             }
 
-            // Create chat UI
-            _chatUI = gameObject.AddComponent<DogChatUI>();
+            // Create chat UI with voice recognition
+            _chatUI = gameObject.AddComponent<DogChatUIWithVoice>();
+            _chatUI.ConfigureVoiceApiToken(huggingFaceApiToken);
+            _chatUI.SetLocalCommandHandler(HandleDogActionCommand);
+            _chatUI.SetModelActionHandler(HandleModelSuggestedAction);
+
+            AutoDetectActionRange();
+            DogChatAPI.SetActionCategoryCount(maxActionId);
 
             // Ensure collider exists for click detection
             EnsureCollider();
@@ -153,7 +171,12 @@ namespace Morphis.Companion
 
             if (_chatUI != null)
             {
-                _chatUI.Toggle();
+                // Click on dog should always open chat when closed.
+                // When open, keep it open (avoid accidental close from click-through).
+                if (!_chatUI.IsOpen)
+                {
+                    _chatUI.Open();
+                }
             }
         }
 
@@ -266,6 +289,9 @@ namespace Morphis.Companion
 
         private void Update()
         {
+            // If a command action is active, keep showing it and temporarily pause follow locomotion.
+            if (UpdateCommandActionPlayback()) return;
+
             // Continuously try to find player if not assigned (for networked games)
             if (target == null)
             {
@@ -309,6 +335,138 @@ namespace Morphis.Companion
             UpdateAnimation(distanceToTarget, shouldRun);
 
             _lastTargetPosition = target.position;
+        }
+
+        private string HandleDogActionCommand(string rawMessage)
+        {
+            if (string.IsNullOrWhiteSpace(rawMessage)) return null;
+
+            string message = rawMessage.Trim();
+            if (message.Length == 0) return null;
+
+            // Help/list command: "动作", "动作列表", "action", "action list"
+            if (Regex.IsMatch(message, @"^(动作|action)\s*(列表|list|help)?$", RegexOptions.IgnoreCase))
+            {
+                return $"我会的动作是：动作1 到 动作{maxActionId}。例如输入“动作3”。";
+            }
+
+            Match match = Regex.Match(message, @"^(动作|action)\s*([0-9]+)$", RegexOptions.IgnoreCase);
+            if (!match.Success) return null;
+
+            if (!int.TryParse(match.Groups[2].Value, out int actionId))
+            {
+                return $"我没看懂这个动作编号。可用范围：动作1 到 动作{maxActionId}。";
+            }
+
+            if (actionId < 1 || actionId > maxActionId)
+            {
+                return $"这个动作超出范围啦，我现在支持 动作1 到 动作{maxActionId}。";
+            }
+
+            if (_animator == null)
+            {
+                return "我现在还不能做动作（缺少 Animator）。";
+            }
+
+            TriggerCommandAction(actionId);
+            return $"收到，我来做动作{actionId}！";
+        }
+
+        private void TriggerCommandAction(int actionId)
+        {
+            _isCommandActionActive = true;
+            _commandActionAnimId = actionId;
+            _commandActionEndTime = Time.time + Mathf.Max(0.2f, actionCommandDuration);
+
+            if (_agent != null && _agent.isActiveAndEnabled && _agent.hasPath)
+            {
+                _agent.ResetPath();
+            }
+
+            if (_animator != null)
+            {
+                _currentAnimId = actionId;
+                _animator.SetInteger(AnimationIDHash, actionId);
+                Debug.Log($"[DogCompanion] Command action triggered: 动作{actionId}");
+            }
+        }
+
+        private void HandleModelSuggestedAction(int actionCategory)
+        {
+            if (actionCategory < 1 || actionCategory > maxActionId)
+            {
+                Debug.Log($"[DogCompanion] Ignored model action category {actionCategory}. Valid range is 1..{maxActionId}.");
+                return;
+            }
+
+            TriggerCommandAction(actionCategory);
+        }
+
+        private bool UpdateCommandActionPlayback()
+        {
+            if (!_isCommandActionActive) return false;
+
+            if (_animator == null)
+            {
+                _isCommandActionActive = false;
+                _commandActionAnimId = -1;
+                return false;
+            }
+
+            if (Time.time >= _commandActionEndTime)
+            {
+                _isCommandActionActive = false;
+                _commandActionAnimId = -1;
+                return false;
+            }
+
+            if (_agent != null && _agent.isActiveAndEnabled && _agent.hasPath)
+            {
+                _agent.ResetPath();
+            }
+
+            if (_currentAnimId != _commandActionAnimId)
+            {
+                _currentAnimId = _commandActionAnimId;
+                _animator.SetInteger(AnimationIDHash, _commandActionAnimId);
+            }
+
+            return true;
+        }
+
+        private void AutoDetectActionRange()
+        {
+            if (_animator == null || _animator.runtimeAnimatorController == null)
+            {
+                maxActionId = Mathf.Max(1, maxActionId);
+                return;
+            }
+
+            int detectedMax = 0;
+            var clips = _animator.runtimeAnimatorController.animationClips;
+            for (int i = 0; i < clips.Length; i++)
+            {
+                var clip = clips[i];
+                if (clip == null) continue;
+
+                // Match clip names like "Action1", "Action_2", "动作3".
+                Match m = Regex.Match(clip.name, @"(?:动作|action)[\s_-]*([0-9]+)", RegexOptions.IgnoreCase);
+                if (m.Success && int.TryParse(m.Groups[1].Value, out int id))
+                {
+                    if (id > detectedMax) detectedMax = id;
+                }
+            }
+
+            if (detectedMax > 0)
+            {
+                maxActionId = detectedMax;
+                Debug.Log($"[DogCompanion] Auto-detected action range: 动作1~动作{maxActionId}");
+            }
+            else
+            {
+                maxActionId = Mathf.Max(1, maxActionId);
+                Debug.Log($"[DogCompanion] Action range fallback: 动作1~动作{maxActionId} (no ActionX clips detected)");
+            }
         }
 
         private Vector3 CalculateTargetPosition()
