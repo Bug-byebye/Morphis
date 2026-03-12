@@ -79,6 +79,19 @@ namespace Morphis.AppFlow
 
         private void Awake()
         {
+            // Dedicated Server 模式下不需要任何登录/空间选择 UI，直接进入主场景由服务器权威同步
+            if (Morphis.AppRuntime.IsServer)
+            {
+                Debug.Log("[BootFlow] Server mode detected. Skipping Boot UI and loading main scene directly.");
+                var active = SceneManager.GetActiveScene();
+                if (!string.IsNullOrEmpty(mainSceneName) && active.name != mainSceneName)
+                {
+                    SceneManager.LoadScene(mainSceneName);
+                }
+                Destroy(gameObject);
+                return;
+            }
+
             // 如果已经完成登录 + 选空间（例如已经进入 MainScene），则不再重复执行引导流程
             if (AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId))
             {
