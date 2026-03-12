@@ -21,6 +21,12 @@ namespace Morphis.ModelPlacement
         private Camera _cam;
         private Collider[] _colliders;
         // private Vector3 _dragOffset; // Removed to ensure center alignment
+
+        // Used when running as a network client: we compute the intended target but do not directly
+        // mutate transforms (server-authoritative). These values can be consumed by a network layer
+        // (e.g., Command/RPC) if implemented.
+        private Vector3 _pendingTargetPos;
+        private float _pendingGroundHeight;
         
         private enum EditMode { None, Move, Rotate, Scale }
         private EditMode _currentMode = EditMode.None;

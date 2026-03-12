@@ -1,3 +1,4 @@
+"""
 FastAPI 服务：为 Unity 节点编辑器提供各种 AI 生成 API
 
 端点列表:
