@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Mirror;
 
@@ -18,6 +19,23 @@ namespace Morphis.AppFlow
 
         private bool _exitDialogVisible;
         private GameObject _exitDialogCanvas;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void AutoCreate()
+        {
+            if (Application.isBatchMode) return;
+            if (FindFirstObjectByType<GlobalSceneController>() != null) return;
+
+            var go = new GameObject("GlobalSceneController(Auto)");
+            DontDestroyOnLoad(go);
+            go.AddComponent<GlobalSceneController>();
+        }
+
+        private void Awake()
+        {
+            DontDestroyOnLoad(gameObject);
+            EnsureEventSystem();
+        }
 
         private void Update()
         {
@@ -124,6 +142,20 @@ namespace Morphis.AppFlow
             resumeBtn.onClick.AddListener(() => ToggleExitDialog());
 
             return canvasGO;
+        }
+
+        private static void EnsureEventSystem()
+        {
+            if (FindFirstObjectByType<EventSystem>() != null) return;
+
+            var eventSystemGO = new GameObject("EventSystem");
+            eventSystemGO.AddComponent<EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+            eventSystemGO.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+#else
+            eventSystemGO.AddComponent<StandaloneInputModule>();
+#endif
+            DontDestroyOnLoad(eventSystemGO);
         }
 
         private Button CreateButton(Transform parent, string label, Vector2 anchoredPos)

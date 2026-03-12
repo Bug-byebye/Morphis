@@ -4884,7 +4884,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e686d6aac84114710bb6aff634a893c0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Interactions.SceneTransition
-  targetSceneName: demo
+  targetSceneName: HouseScene
   doubleClickThreshold: 0.3
 --- !u!1001 &585198860
 PrefabInstance:

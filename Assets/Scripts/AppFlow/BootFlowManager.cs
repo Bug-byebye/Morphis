@@ -116,11 +116,7 @@ namespace Morphis.AppFlow
             
             DontDestroyOnLoad(gameObject);
             
-            // Auto-add Global Scene Controller for ESC key handling
-            if (GetComponent<GlobalSceneController>() == null)
-            {
-                gameObject.AddComponent<GlobalSceneController>();
-            }
+            // GlobalSceneController now auto-creates itself at runtime.
         }
         
         private void Start()
@@ -1540,4 +1536,3 @@ namespace Morphis.AppFlow
         }
     }
 }
-
