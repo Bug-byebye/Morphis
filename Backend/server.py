@@ -86,7 +86,7 @@ class WorkspaceDto(BaseModel):
     name: str
     members: List[str]
     status: str = "stopped"  # World 运行状态
-    port: int = None  # 连接端口
+    port: Optional[int] = None  # 连接端口
     player_count: int = 0  # 当前玩家数
 
 class WorkspaceListResponse(BaseModel):
@@ -200,6 +200,9 @@ async def create_workspace(
         )
         return CreateWorkspaceResponse(id=world.id, name=world.name)
     except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[CreateWorkspace] Error: {error_detail}")
         return Response(content=str(e), status_code=400)
 
 
@@ -262,6 +265,9 @@ async def join_world(
         server_port=result["port"],
         message=f"World ready on {server_ip}:{result['port']}"
     )
+
+
+@app.get("/workspaces", response_model=WorkspaceListResponse)
 async def list_workspaces(
     authorization: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),

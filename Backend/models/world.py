@@ -34,7 +34,7 @@ class World(Base):
     
     # 进程管理字段
     status = Column(
-        SQLEnum(WorldStatus),
+        SQLEnum(WorldStatus, native_enum=True, create_constraint=False, name='worldstatus', values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=WorldStatus.STOPPED,
         comment="World 进程状态"
