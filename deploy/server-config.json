@@ -1,0 +1,19 @@
+{
+  "ApiBaseUrl": "http://localhost:8000",
+  "ServerListenAddress": "0.0.0.0",
+  "ServerPort": 7777,
+  "DefaultWorldId": "default-world",
+  "Database": {
+    "Host": "pgm-bp18b2zkp3d07pz8so.pg.rds.aliyuncs.com",
+    "Port": 5432,
+    "Name": "morphis-data",
+    "User": "MorphisServer",
+    "Password": "Morphis1234"
+  },
+  "UnityServer": {
+    "ExecutablePath": "/root/MorphisServer/Morphis.x86_64",
+    "BasePort": 7777,
+    "MaxWorlds": 50,
+    "IdleTimeoutMinutes": 5
+  }
+}

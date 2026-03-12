@@ -32,9 +32,12 @@ namespace AIPipeline.Nodes
                 return;
             }
             
-            // 获取 PipelineGraph 来拿 server URL
+            // 获取 PipelineGraph / AppConfig 来拿 server URL
             var graph = GetComponentInParent<PipelineGraph>();
-            string url = graph != null ? graph.serverUrl + endpoint : "http://localhost:8000" + endpoint;
+            string baseUrl = graph != null && !string.IsNullOrEmpty(graph.serverUrl)
+                ? graph.serverUrl
+                : Morphis.Config.AppConfig.Instance.ApiBaseUrl;
+            string url = baseUrl + endpoint;
             
             StartCoroutine(SendRequest(url, prompt, onComplete, onError));
         }

@@ -7,6 +7,8 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using GLTFast;
 using Morphis.WorldSnapshot;
+using Mirror;
+using StarterAssets;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -311,6 +313,30 @@ namespace Morphis.ModelPlacement
         {
             if (!GetPlacementInfo(screenPos, out var worldPos, out var targetBaseY))
                 return false;
+
+            // 联机模式：客户端不能直接 Instantiate；改为 Command -> Server -> RPC 生成
+            if (NetworkClient.active)
+            {
+                if (NetworkPlayerSetup.Local == null)
+                {
+                    Debug.LogWarning("[ModelLibrary] No local player found. Cannot request server place.");
+                    return false;
+                }
+
+                if (def.Prefab != null)
+                {
+                    return NetworkPlayerSetup.Local.RequestPlace($"{resourcesPath}/{def.DisplayName}", worldPos, Quaternion.identity, Vector3.one);
+                }
+
+                if (def.GlbAsset != null)
+                {
+                    // 约定：glb:<name>，客户端通过 Resources/Placeables/<name> 加载
+                    return NetworkPlayerSetup.Local.RequestPlace($"glb:{def.DisplayName}", worldPos, Quaternion.identity, Vector3.one);
+                }
+
+                // primitive
+                return NetworkPlayerSetup.Local.RequestPlace($"primitive:{def.FallbackPrimitive}", worldPos, Quaternion.identity, Vector3.one);
+            }
 
             // 1) Prefab
             if (def.Prefab != null)

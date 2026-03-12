@@ -2,6 +2,8 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using System.Collections;
 using Morphis.AppFlow;
+using Mirror;
+using StarterAssets;
 using Morphis.WorldSnapshot;
 
 namespace Morphis.ModelPlacement
@@ -321,6 +323,15 @@ namespace Morphis.ModelPlacement
                         targetPos.z = clampedPlane.z;
                         // Y remains from ground point
                     }
+                }
+
+                _pendingTargetPos = targetPos;
+                _pendingGroundHeight = groundHeight;
+
+                // 联机模式：不直接改 Transform（避免客户端直改世界对象）
+                if (NetworkClient.active)
+                {
+                    return;
                 }
 
                 transform.position = targetPos;

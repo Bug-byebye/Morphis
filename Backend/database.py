@@ -2,19 +2,13 @@
 数据库连接配置
 使用 SQLAlchemy 2.0（同步模式）
 """
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
+from config import get_database_url
 
-load_dotenv()
-
-# 从环境变量获取数据库 URL
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/morphis"
-)
+# 从 deploy/server-config.json 获取数据库 URL
+DATABASE_URL = get_database_url()
 
 # 创建数据库引擎
 engine = create_engine(

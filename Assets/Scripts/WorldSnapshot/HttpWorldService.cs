@@ -12,74 +12,10 @@ namespace Morphis.WorldSnapshot
     /// </summary>
     public class HttpWorldService : MonoBehaviour
     {
-        [Header("Backend Configuration")]
-        [SerializeField] private string baseUrl = "http://localhost:8000";
-
-        [Tooltip("是否自动从 AppSession 获取 BaseUrl 和 Token（如果存在）")]
-        [SerializeField] private bool useAppSession = true;
-
-        private string GetBaseUrl()
-        {
-            // 尝试从 AppSession 获取 BaseUrl（如果启用且存在）
-            if (useAppSession)
-            {
-                var appSessionUrl = GetAppSessionBaseUrl();
-                if (!string.IsNullOrEmpty(appSessionUrl))
-                {
-                    return appSessionUrl;
-                }
-            }
-            return baseUrl;
-        }
-
-        private string GetAppSessionBaseUrl()
-        {
-            if (!useAppSession) return null;
-
-            try
-            {
-                // 使用反射访问 AppSession.BaseUrl（避免编译时依赖）
-                // 尝试多种方式查找类型
-                Type appSessionType = null;
-                
-                // 方式1：通过完整类型名查找（适用于默认程序集）
-                appSessionType = Type.GetType("Morphis.AppFlow.AppSession");
-                
-                // 方式2：如果方式1失败，尝试从所有已加载的程序集中查找
-                if (appSessionType == null)
-                {
-                    foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
-                    {
-                        appSessionType = assembly.GetType("Morphis.AppFlow.AppSession");
-                        if (appSessionType != null) break;
-                    }
-                }
-
-                if (appSessionType != null)
-                {
-                    var baseUrlProp = appSessionType.GetProperty("BaseUrl", BindingFlags.Public | BindingFlags.Static);
-                    if (baseUrlProp != null)
-                    {
-                        var value = baseUrlProp.GetValue(null) as string;
-                        if (!string.IsNullOrEmpty(value))
-                        {
-                            return value;
-                        }
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                // 静默失败，不影响功能
-                Debug.LogWarning($"[HttpWorldService] Failed to get AppSession.BaseUrl: {e.Message}");
-            }
-            return null;
-        }
+        private string GetBaseUrl() => Morphis.Config.AppConfig.Instance.ApiBaseUrl;
 
         private string GetAppSessionToken()
         {
-            if (!useAppSession) return null;
-
             try
             {
                 Type appSessionType = null;
@@ -112,8 +48,6 @@ namespace Morphis.WorldSnapshot
 
         private bool IsAppSessionLoggedIn()
         {
-            if (!useAppSession) return false;
-
             try
             {
                 Type appSessionType = null;
@@ -187,7 +121,7 @@ namespace Morphis.WorldSnapshot
                 req.SetRequestHeader("Content-Type", "application/json");
 
                 // 如果已登录，添加认证头
-                if (useAppSession && IsAppSessionLoggedIn())
+                if (IsAppSessionLoggedIn())
                 {
                     var token = GetAppSessionToken();
                     if (!string.IsNullOrEmpty(token))
@@ -245,7 +179,7 @@ namespace Morphis.WorldSnapshot
             using (var req = UnityWebRequest.Get(url))
             {
                 // 如果已登录，添加认证头
-                if (useAppSession && IsAppSessionLoggedIn())
+                if (IsAppSessionLoggedIn())
                 {
                     var token = GetAppSessionToken();
                     if (!string.IsNullOrEmpty(token))

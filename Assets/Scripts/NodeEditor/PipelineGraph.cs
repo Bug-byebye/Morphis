@@ -11,7 +11,7 @@ namespace AIPipeline
     {
         [Header("Pipeline Settings")]
         public string pipelineName = "New Pipeline";
-        public string serverUrl = "http://localhost:8000";
+        public string serverUrl = "";
         
         [Header("Nodes")]
         public List<PipelineNode> nodes = new List<PipelineNode>();

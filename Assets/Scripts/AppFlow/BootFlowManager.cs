@@ -22,8 +22,15 @@ namespace Morphis.AppFlow
     /// </summary>
     public class BootFlowManager : MonoBehaviour
     {
-        [Header("Backend")]
-        [SerializeField] private string baseUrl = "http://localhost:8000";
+        [Serializable]
+        private class JoinWorldResponseDto
+        {
+            public string status;
+            public string world_id;
+            public string server_address;
+            public int server_port;
+            public string message;
+        }
 
         [Header("Scene")]
         [SerializeField] private string mainSceneName = "MainScene";
@@ -63,6 +70,7 @@ namespace Morphis.AppFlow
         private string RegisterUrl => $"{AppSession.BaseUrl}/auth/register";
         private string WorkspacesUrl => $"{AppSession.BaseUrl}/workspaces";
         private string CreateWorkspaceUrl => $"{AppSession.BaseUrl}/workspaces/create";
+        private string JoinWorldUrl => $"{AppSession.BaseUrl}/workspaces/join";
 
         private static BootFlowManager _instance;
         private bool _initialized;
@@ -101,7 +109,11 @@ namespace Morphis.AppFlow
                 _instance = this;
             }
 
-            AppSession.BaseUrl = baseUrl;
+            // 确保 AppSession.BaseUrl 从配置文件初始化（不再需要手动设置，getter 会自动处理）
+            // 但为了确保配置已加载，我们在这里触发一次访问
+            var baseUrl = AppSession.BaseUrl;
+            Debug.Log($"[BootFlow] AppSession.BaseUrl initialized: {baseUrl}");
+            
             DontDestroyOnLoad(gameObject);
             
             // Auto-add Global Scene Controller for ESC key handling
@@ -650,6 +662,8 @@ namespace Morphis.AppFlow
 
             SetStatus("Creating space...");
 
+            LogRequest("POST", CreateWorkspaceUrl, body, AppSession.Token);
+
             using (var req = new UnityWebRequest(CreateWorkspaceUrl, "POST"))
             {
                 var bodyRaw = Encoding.UTF8.GetBytes(body);
@@ -659,6 +673,8 @@ namespace Morphis.AppFlow
                 req.SetRequestHeader("Authorization", $"Bearer {AppSession.Token}");
 
                 yield return req.SendWebRequest();
+
+                LogResponse(req);
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
@@ -775,6 +791,8 @@ namespace Morphis.AppFlow
             var body = $"{{\"username\":\"{EscapeJson(username)}\",\"password\":\"{EscapeJson(password)}\"}}";
             var bodyRaw = Encoding.UTF8.GetBytes(body);
 
+            LogRequest("POST", url, body);
+
             using (var req = new UnityWebRequest(url, "POST"))
             {
                 req.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -782,6 +800,8 @@ namespace Morphis.AppFlow
                 req.SetRequestHeader("Content-Type", "application/json");
 
                 yield return req.SendWebRequest();
+
+                LogResponse(req);
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
@@ -814,10 +834,14 @@ namespace Morphis.AppFlow
             ClearWorkspaceList();
             SetStatus("Loading workspaces...");
 
+            LogRequest("GET", WorkspacesUrl, token: AppSession.Token);
+
             using (var req = UnityWebRequest.Get(WorkspacesUrl))
             {
                 req.SetRequestHeader("Authorization", $"Bearer {AppSession.Token}");
                 yield return req.SendWebRequest();
+
+                LogResponse(req);
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
@@ -848,9 +872,73 @@ namespace Morphis.AppFlow
             }
 
             _busy = true;
-            SetStatus($"Entering: {_selectedWorkspaceName} ...");
+            SetStatus($"Requesting world: {_selectedWorkspaceName} ...");
 
+            // 调用 /workspaces/join API 获取 World 连接信息
+            string serverAddress = null;
+            int serverPort = 0;
+            
+            var body = $"{{\"world_id\":\"{EscapeJson(_selectedWorkspaceId)}\"}}";
+            var bodyRaw = Encoding.UTF8.GetBytes(body);
+
+            LogRequest("POST", JoinWorldUrl, body, AppSession.Token);
+
+            using (var req = new UnityWebRequest(JoinWorldUrl, "POST"))
+            {
+                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type", "application/json");
+                req.SetRequestHeader("Authorization", $"Bearer {AppSession.Token}");
+
+                yield return req.SendWebRequest();
+
+                LogResponse(req);
+
+                if (req.result != UnityWebRequest.Result.Success)
+                {
+                    SetStatus($"Join world failed: {req.error}");
+                    _busy = false;
+                    yield break;
+                }
+
+                if (req.responseCode >= 400)
+                {
+                    SetStatus($"Join world failed ({req.responseCode}): {req.downloadHandler.text}");
+                    _busy = false;
+                    yield break;
+                }
+
+                // 解析响应：{"status":"ok","world_id":"...","server_address":"...","server_port":7777}
+                var json = req.downloadHandler.text;
+                try
+                {
+                    var dto = JsonUtility.FromJson<JoinWorldResponseDto>(json);
+                    serverAddress = dto?.server_address;
+                    serverPort = dto?.server_port ?? 0;
+                }
+                catch
+                {
+                    serverAddress = null;
+                    serverPort = 0;
+                }
+
+                if (!string.IsNullOrEmpty(serverAddress) && serverPort > 0)
+                {
+                    Debug.Log($"[BootFlow] World ready: {serverAddress}:{serverPort}");
+                }
+                else
+                {
+                    SetStatus("Failed to parse server connection info");
+                    _busy = false;
+                    yield break;
+                }
+            }
+
+            // 保存连接信息到 AppSession
             AppSession.SetWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
+            AppSession.SetServerConnection(serverAddress, serverPort);
+
+            SetStatus($"Connecting to {serverAddress}:{serverPort} ...");
 
             // 立即隐藏/销毁 BootScene 的 UI，确保不会在加载过程中显示
             if (_canvas != null)
@@ -1386,6 +1474,52 @@ namespace Morphis.AppFlow
         {
             if (s == null) return "";
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        }
+
+        /// <summary>
+        /// 记录 HTTP 请求详情
+        /// </summary>
+        private static void LogRequest(string method, string url, string body = null, string token = null)
+        {
+            Debug.Log("=== HTTP REQUEST ===");
+            Debug.Log($"Method: {method}");
+            Debug.Log($"URL: {url}");
+            if (!string.IsNullOrEmpty(token))
+            {
+                Debug.Log($"Authorization: Bearer {token.Substring(0, Math.Min(10, token.Length))}...");
+            }
+            if (!string.IsNullOrEmpty(body))
+            {
+                Debug.Log($"Body: {body}");
+            }
+            Debug.Log("====================");
+        }
+
+        /// <summary>
+        /// 记录 HTTP 响应详情
+        /// </summary>
+        private static void LogResponse(UnityWebRequest req)
+        {
+            Debug.Log("=== HTTP RESPONSE ===");
+            Debug.Log($"Status: {req.responseCode}");
+            Debug.Log($"Result: {req.result}");
+            if (!string.IsNullOrEmpty(req.error))
+            {
+                Debug.Log($"Error: {req.error}");
+            }
+            if (req.downloadHandler != null && !string.IsNullOrEmpty(req.downloadHandler.text))
+            {
+                var text = req.downloadHandler.text;
+                if (text.Length > 500)
+                {
+                    Debug.Log($"Response: {text.Substring(0, 500)}... (truncated, total {text.Length} chars)");
+                }
+                else
+                {
+                    Debug.Log($"Response: {text}");
+                }
+            }
+            Debug.Log("=====================");
         }
 
         /// <summary>

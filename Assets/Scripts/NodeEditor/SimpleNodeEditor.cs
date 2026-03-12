@@ -15,13 +15,13 @@ namespace AIPipeline.UI
     public class SimpleNodeEditor : MonoBehaviour
     {
         [Header("Settings")]
-        public string baseUrl = "http://localhost:8000";
+        public string baseUrl = "";
         
         // API 端点
-        private string Text2ImageUrl => $"{baseUrl}/text2image/urls";
-        private string Image2ImageUrl => $"{baseUrl}/image2image";
-        private string Image23DUrl => $"{baseUrl}/image23d";
-        private string Text23DUrl => $"{baseUrl}/text23d";
+        private string Text2ImageUrl => $"{GetBaseUrl()}/text2image/urls";
+        private string Image2ImageUrl => $"{GetBaseUrl()}/image2image";
+        private string Image23DUrl => $"{GetBaseUrl()}/image23d";
+        private string Text23DUrl => $"{GetBaseUrl()}/text23d";
         
         // UI 元素
         private GameObject editorRoot;
@@ -76,6 +76,14 @@ namespace AIPipeline.UI
             }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+        }
+
+        private string GetBaseUrl()
+        {
+            if (!string.IsNullOrEmpty(baseUrl))
+                return baseUrl;
+
+            return Morphis.Config.AppConfig.Instance.ApiBaseUrl;
         }
 
         IEnumerator Start()

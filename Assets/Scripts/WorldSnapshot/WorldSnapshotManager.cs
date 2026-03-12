@@ -2,6 +2,8 @@ using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Morphis.AppFlow;
+using Mirror;
+using StarterAssets;
 
 namespace Morphis.WorldSnapshot
 {
@@ -67,6 +69,13 @@ namespace Morphis.WorldSnapshot
             if (scene.name != "MainScene" || !autoLoadOnStart)
                 return;
 
+            // 联机模式：世界状态由服务器权威下发（Command/RPC），客户端不再走 HTTP/本地加载
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                Debug.Log("[WorldSnapshotManager] Network mode detected. Skip auto-load (world is server-authoritative).");
+                return;
+            }
+
             _currentWorldId = !string.IsNullOrEmpty(AppSession.WorkspaceId) ? AppSession.WorkspaceId : defaultWorldId;
             if (string.IsNullOrEmpty(_currentWorldId))
                 return;
@@ -99,6 +108,13 @@ namespace Morphis.WorldSnapshot
         {
             if (!autoLoadOnStart || UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "MainScene")
                 return;
+
+            // 联机模式：世界由服务器下发，不从本地/HTTP 直接加载
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                Debug.Log("[WorldSnapshotManager] Network mode detected. Skip Start() auto-load.");
+                return;
+            }
             // 若 Awake 时未设置（非 MainScene 加载路径），这里用 AppSession.WorkspaceId 补上，避免误用 defaultWorldId
             if (string.IsNullOrEmpty(_currentWorldId))
                 _currentWorldId = !string.IsNullOrEmpty(AppSession.WorkspaceId) ? AppSession.WorkspaceId : defaultWorldId;
@@ -117,6 +133,12 @@ namespace Morphis.WorldSnapshot
         {
             var worldId = GetCurrentWorldId();
             if (string.IsNullOrEmpty(worldId)) return;
+
+            // 联机模式：保存由服务器权威执行（客户端只可发起请求）
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                return;
+            }
             // 仅保存到数据库：已登录时只写服务器，不写本地；未登录不持久化
             if (AppSession.IsLoggedIn)
             {
@@ -130,6 +152,12 @@ namespace Morphis.WorldSnapshot
             if (!pause) return;
             var worldId = GetCurrentWorldId();
             if (string.IsNullOrEmpty(worldId)) return;
+
+            // 联机模式：保存由服务器权威执行（客户端只可发起请求）
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                return;
+            }
             if (AppSession.IsLoggedIn)
                 SaveWorldServer(worldId, onError: _ => { });
         }
@@ -151,6 +179,22 @@ namespace Morphis.WorldSnapshot
         {
             worldId = worldId ?? GetCurrentWorldId();
             Debug.Log($"[WorldSnapshotManager] SaveWorldServer: world_id={worldId}");
+
+            // 联机模式：客户端不能直接构建并 POST；改为发 Command 给服务器
+            if (NetworkClient.active)
+            {
+                if (NetworkPlayerSetup.Local != null && NetworkPlayerSetup.Local.RequestSaveWorld())
+                {
+                    onSuccess?.Invoke(); // 触发成功回调（实际保存结果在服务器日志里）
+                }
+                else
+                {
+                    onError?.Invoke("No local player / not connected. Cannot request server save.");
+                }
+                return;
+            }
+
+            // 单机/离线保持原逻辑
             var snapshot = WorldSnapshotBuilder.BuildSnapshot(worldId);
             _httpService.SaveToServer(snapshot, onSuccess, onError);
         }
@@ -181,6 +225,11 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public void LoadWorldFromLocal(string worldId = null, Action onSuccess = null, Action<string> onError = null)
         {
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                onError?.Invoke("Network mode: client is not allowed to load world directly.");
+                return;
+            }
             worldId = worldId ?? GetCurrentWorldId();
             var snapshot = LocalWorldStorage.LoadFromLocal(worldId);
 
@@ -201,6 +250,11 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public void LoadWorldFromServer(string worldId = null, Action onSuccess = null, Action<string> onError = null)
         {
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                onError?.Invoke("Network mode: client is not allowed to load world directly.");
+                return;
+            }
             worldId = worldId ?? GetCurrentWorldId();
             _httpService.LoadFromServer(worldId,
                 snapshot =>
@@ -216,6 +270,11 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         private void ApplySnapshot(WorldSnapshot snapshot)
         {
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                Debug.Log("[WorldSnapshotManager] Network mode: ApplySnapshot is handled by server RPC.");
+                return;
+            }
             int count = WorldSnapshotApplier.ApplySnapshot(snapshot, clearExisting: true);
             Debug.Log($"[WorldSnapshotManager] Applied snapshot: {count} objects instantiated");
         }
@@ -225,6 +284,11 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public void ClearWorld()
         {
+            if (NetworkClient.active || NetworkServer.active)
+            {
+                Debug.Log("[WorldSnapshotManager] Network mode: ClearWorld is not allowed on client.");
+                return;
+            }
             WorldSnapshotApplier.ClearAllWorldObjects();
             Debug.Log("[WorldSnapshotManager] World cleared");
         }
