@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Morphis.InputControl;
+using Morphis.AppFlow;
+using Morphis.WorldSnapshot;
 
 /// <summary>
 /// 物体交互管理器 - 处理留言输入对话框和悬浮提示
@@ -47,6 +50,7 @@ public class ObjectInteractionManager : MonoBehaviour
         Instance.draggingObject = null;
         if (Instance.commentDialog != null && Instance.commentDialog)
             Instance.commentDialog.SetActive(false);
+        GameplayInputBlocker.SetBlocked(Instance, false);
         if (Instance.tooltipPanel != null && Instance.tooltipPanel)
             Instance.tooltipPanel.SetActive(false);
     }
@@ -110,7 +114,7 @@ public class ObjectInteractionManager : MonoBehaviour
         GameObject titleObj = new GameObject("Title");
         titleObj.transform.SetParent(commentDialog.transform, false);
         var titleText = titleObj.AddComponent<TextMeshProUGUI>();
-        titleText.text = "Add Comment";
+        titleText.text = "添加评论";
         titleText.fontSize = 18;
         titleText.fontStyle = FontStyles.Bold;
         titleText.color = Color.white;
@@ -196,7 +200,7 @@ public class ObjectInteractionManager : MonoBehaviour
         GameObject placeholderObj = new GameObject("Placeholder");
         placeholderObj.transform.SetParent(textArea.transform, false);
         var placeholder = placeholderObj.AddComponent<TextMeshProUGUI>();
-        placeholder.text = "Enter your comment...";
+        placeholder.text = "输入你的评论...";
         placeholder.fontSize = 14;
         placeholder.fontStyle = FontStyles.Italic;
         placeholder.color = new Color(0.5f, 0.5f, 0.5f);
@@ -222,9 +226,9 @@ public class ObjectInteractionManager : MonoBehaviour
         hlg.childControlWidth = true;
         hlg.childForceExpandWidth = true;
         
-        CreateDialogButton(btnsArea.transform, "Save", new Color(0.3f, 0.65f, 0.35f), OnSaveComment);
-        CreateDialogButton(btnsArea.transform, "Delete", new Color(0.7f, 0.3f, 0.3f), OnDeleteComment);
-        CreateDialogButton(btnsArea.transform, "Cancel", new Color(0.5f, 0.5f, 0.55f), OnCancelComment);
+        CreateDialogButton(btnsArea.transform, "保存", new Color(0.3f, 0.65f, 0.35f), OnSaveComment);
+        CreateDialogButton(btnsArea.transform, "删除", new Color(0.7f, 0.3f, 0.3f), OnDeleteComment);
+        CreateDialogButton(btnsArea.transform, "取消", new Color(0.5f, 0.5f, 0.55f), OnCancelComment);
         
         commentDialog.SetActive(false);
     }
@@ -402,6 +406,7 @@ public class ObjectInteractionManager : MonoBehaviour
         currentTarget = obj;
         commentInput.text = obj.comment;
         commentDialog.SetActive(true);
+        GameplayInputBlocker.SetBlocked(this, true);
         
         // 隐藏 tooltip
         if (tooltipPanel != null) tooltipPanel.SetActive(false);
@@ -431,6 +436,7 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             currentTarget.SetComment(commentInput.text);
             Debug.Log($"[Interaction] Comment saved: {commentInput.text}");
+            RequestServerAutosave();
         }
         CloseDialog();
     }
@@ -441,6 +447,7 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             currentTarget.ClearComment();
             Debug.Log("[Interaction] Comment deleted");
+            RequestServerAutosave();
         }
         CloseDialog();
     }
@@ -454,7 +461,27 @@ public class ObjectInteractionManager : MonoBehaviour
     {
         Debug.Log($"[Interaction] Closing Dialog. Manager Instance: {GetInstanceID()}");
         commentDialog.SetActive(false);
+        GameplayInputBlocker.SetBlocked(this, false);
         commentInput.text = "";
         currentTarget = null;
+    }
+
+    private void OnDisable()
+    {
+        GameplayInputBlocker.SetBlocked(this, false);
+    }
+
+    private void OnDestroy()
+    {
+        GameplayInputBlocker.SetBlocked(this, false);
+    }
+
+    private static void RequestServerAutosave()
+    {
+        if (!AppSession.IsLoggedIn) return;
+        if (WorldSnapshotManager.Instance == null) return;
+        WorldSnapshotManager.Instance.SaveWorldServer(
+            onError: err => Debug.LogWarning($"[Interaction] Autosave failed after comment edit: {err}")
+        );
     }
 }

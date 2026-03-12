@@ -140,6 +140,17 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public static GameObject GetPrefab(string prefabId)
         {
+            if (string.IsNullOrEmpty(prefabId))
+                return null;
+
+            // 兼容旧格式：glb:XXX -> Placeables/XXX
+            if (prefabId.StartsWith("glb:"))
+            {
+                var name = prefabId.Substring("glb:".Length);
+                if (!string.IsNullOrEmpty(name))
+                    prefabId = $"Placeables/{name}";
+            }
+
             // 先检查运行时注册的 Prefab
             if (_runtimePrefabs.TryGetValue(prefabId, out var runtimePrefab))
             {
@@ -160,6 +171,19 @@ namespace Morphis.WorldSnapshot
                 if (loaded != null)
                 {
                     _runtimePrefabs[prefabId] = loaded;
+                    return loaded;
+                }
+            }
+
+            // 兼容旧 fallback：prefab_id 只有名称时，尝试 Placeables/名称
+            if (!prefabId.Contains("/"))
+            {
+                var placeablesId = $"Placeables/{prefabId}";
+                var loaded = Resources.Load<GameObject>(placeablesId);
+                if (loaded != null)
+                {
+                    _runtimePrefabs[prefabId] = loaded;
+                    _runtimePrefabs[placeablesId] = loaded;
                     return loaded;
                 }
             }

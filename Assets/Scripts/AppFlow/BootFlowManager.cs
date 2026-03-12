@@ -424,7 +424,7 @@ namespace Morphis.AppFlow
 
             // ============ Username ============
             // Label
-            var userLabel = CreateText(panel.transform, "Username", fontSizeLabel, FontStyles.Bold);
+            var userLabel = CreateText(panel.transform, "用户名", fontSizeLabel, FontStyles.Bold);
             var userLabelRect = userLabel.rectTransform;
             userLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
             userLabelRect.anchorMin = new Vector2(0.5f, 1);
@@ -444,7 +444,7 @@ namespace Morphis.AppFlow
             float passY = startY + labelHeight + inputHeight + gap;
             
             // Label
-            var pwdLabel = CreateText(panel.transform, "Password", fontSizeLabel, FontStyles.Bold);
+            var pwdLabel = CreateText(panel.transform, "密码", fontSizeLabel, FontStyles.Bold);
             var pwdLabelRect = pwdLabel.rectTransform;
             pwdLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
             pwdLabelRect.anchorMin = new Vector2(0.5f, 1);
@@ -462,14 +462,14 @@ namespace Morphis.AppFlow
             // ============ Buttons ============
             float btnY = passY + labelHeight + inputHeight + gap * 2;
             
-            _loginBtn = CreateButton(panel.transform, "Login", new Color(0.30f, 0.70f, 0.45f));
+            _loginBtn = CreateButton(panel.transform, "登录", new Color(0.30f, 0.70f, 0.45f));
             var loginRt = _loginBtn.GetComponent<RectTransform>();
             loginRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight); 
             PositionHalf(loginRt, left: true, y: btnY); 
             _loginBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Login()); });
             _loginBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 36; 
 
-            _registerBtn = CreateButton(panel.transform, "Register", new Color(0.55f, 0.45f, 0.85f));
+            _registerBtn = CreateButton(panel.transform, "注册", new Color(0.55f, 0.45f, 0.85f));
             var regRt = _registerBtn.GetComponent<RectTransform>();
             regRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
             PositionHalf(regRt, left: false, y: btnY);
@@ -484,7 +484,7 @@ namespace Morphis.AppFlow
             var panel = CreatePanel(parent, "WorkspacePanel");
             panel.SetActive(false);
 
-            var header = CreateText(panel.transform, "Select Workspace", 32, FontStyles.Bold);
+            var header = CreateText(panel.transform, "选择空间", 32, FontStyles.Bold);
             var headerRect = header.GetComponent<RectTransform>();
             headerRect.anchorMin = new Vector2(0, 1);
             headerRect.anchorMax = new Vector2(1, 1);
@@ -516,7 +516,7 @@ namespace Morphis.AppFlow
 
             _workspaceListRoot = listBox.transform;
 
-            _enterBtn = CreateButton(panel.transform, "Enter", new Color(0.30f, 0.55f, 0.90f));
+            _enterBtn = CreateButton(panel.transform, "进入", new Color(0.30f, 0.55f, 0.90f));
             // Larger Enter button
             var enterRect = _enterBtn.GetComponent<RectTransform>();
             enterRect.anchorMin = new Vector2(0.5f, 0);
@@ -528,7 +528,7 @@ namespace Morphis.AppFlow
             _enterBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 32;
 
             // Create Space button
-            _createSpaceBtn = CreateButton(panel.transform, "Create Space", new Color(0.40f, 0.65f, 0.40f));
+            _createSpaceBtn = CreateButton(panel.transform, "创建空间", new Color(0.40f, 0.65f, 0.40f));
             var createRect = _createSpaceBtn.GetComponent<RectTransform>();
             createRect.anchorMin = new Vector2(0.5f, 0);
             createRect.anchorMax = new Vector2(0.5f, 0);
@@ -555,7 +555,7 @@ namespace Morphis.AppFlow
             float gap = 30;
 
             // Header
-            var header = CreateText(panel.transform, "Create New Space", 36, FontStyles.Bold);
+            var header = CreateText(panel.transform, "创建新空间", 36, FontStyles.Bold);
             var headerRect = header.GetComponent<RectTransform>();
             headerRect.anchorMin = new Vector2(0.5f, 1);
             headerRect.anchorMax = new Vector2(0.5f, 1);
@@ -565,7 +565,7 @@ namespace Morphis.AppFlow
             header.alignment = TextAlignmentOptions.Center;
 
             // Space Name
-            var nameLabel = CreateText(panel.transform, "Space Name (optional)", fontSizeLabel, FontStyles.Normal);
+            var nameLabel = CreateText(panel.transform, "空间名称（可选）", fontSizeLabel, FontStyles.Normal);
             var nameLabelRect = nameLabel.rectTransform;
             nameLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
             nameLabelRect.anchorMin = new Vector2(0.5f, 1);
@@ -581,7 +581,7 @@ namespace Morphis.AppFlow
 
             // Co-owner Username
             float coOwnerY = startY + labelHeight + inputHeight + gap;
-            var coOwnerLabel = CreateText(panel.transform, "Co-owner Username (optional)", fontSizeLabel, FontStyles.Normal);
+            var coOwnerLabel = CreateText(panel.transform, "共同拥有者用户名（可选）", fontSizeLabel, FontStyles.Normal);
             var coOwnerLabelRect = coOwnerLabel.rectTransform;
             coOwnerLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
             coOwnerLabelRect.anchorMin = new Vector2(0.5f, 1);
@@ -598,7 +598,7 @@ namespace Morphis.AppFlow
             // Buttons
             float btnY = coOwnerY + labelHeight + inputHeight + gap * 2;
 
-            _createSpaceSubmitBtn = CreateButton(panel.transform, "Create", new Color(0.30f, 0.70f, 0.45f));
+            _createSpaceSubmitBtn = CreateButton(panel.transform, "创建", new Color(0.30f, 0.70f, 0.45f));
             var submitRt = _createSpaceSubmitBtn.GetComponent<RectTransform>();
             submitRt.anchorMin = new Vector2(0.5f, 1);
             submitRt.anchorMax = new Vector2(0.5f, 1);
@@ -608,7 +608,7 @@ namespace Morphis.AppFlow
             _createSpaceSubmitBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(CreateSpace()); });
             _createSpaceSubmitBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
 
-            _createSpaceBackBtn = CreateButton(panel.transform, "Back", new Color(0.45f, 0.45f, 0.50f));
+            _createSpaceBackBtn = CreateButton(panel.transform, "返回", new Color(0.45f, 0.45f, 0.50f));
             var backRt = _createSpaceBackBtn.GetComponent<RectTransform>();
             backRt.anchorMin = new Vector2(0.5f, 1);
             backRt.anchorMax = new Vector2(0.5f, 1);

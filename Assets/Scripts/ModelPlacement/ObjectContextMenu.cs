@@ -2,12 +2,13 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System;
+using Morphis.InputControl;
 
 namespace Morphis.ModelPlacement
 {
     /// <summary>
     /// Context menu that appears when clicking on a placeable object
-    /// Allows user to choose: Move Object or Leave Message
+    /// Allows user to choose: edit, message, or delete object
     /// </summary>
     public class ObjectContextMenu : MonoBehaviour
     {
@@ -20,12 +21,18 @@ namespace Morphis.ModelPlacement
         
         // Button references
         private GameObject _moveBtn;
+        private GameObject _rotateBtn;
+        private GameObject _scaleBtn;
         private GameObject _messageBtn;
+        private GameObject _deleteBtn;
         
         // Current target
         private GameObject _targetObject;
         private Action _onMoveSelected;
+        private Action _onRotateSelected;
+        private Action _onScaleSelected;
         private Action _onMessageSelected;
+        private Action _onDeleteSelected;
 
         private void Awake()
         {
@@ -80,10 +87,19 @@ namespace Morphis.ModelPlacement
             layout.childForceExpandHeight = false;
 
             // Move button
-            _moveBtn = CreateMenuButton(_menuPanel.transform, "✋ Move Object", new Color(0.2f, 0.5f, 0.9f), OnMoveClicked);
+            _moveBtn = CreateMenuButton(_menuPanel.transform, "移动物体", new Color(0.2f, 0.5f, 0.9f), OnMoveClicked);
+            
+            // Rotate button
+            _rotateBtn = CreateMenuButton(_menuPanel.transform, "旋转物体", new Color(0.7f, 0.5f, 0.2f), OnRotateClicked);
+            
+            // Scale button
+            _scaleBtn = CreateMenuButton(_menuPanel.transform, "缩放物体", new Color(0.6f, 0.3f, 0.7f), OnScaleClicked);
             
             // Message button
-            _messageBtn = CreateMenuButton(_menuPanel.transform, "💬 Leave Message", new Color(0.3f, 0.65f, 0.35f), OnMessageClicked);
+            _messageBtn = CreateMenuButton(_menuPanel.transform, "留言", new Color(0.3f, 0.65f, 0.35f), OnMessageClicked);
+
+            // Delete button
+            _deleteBtn = CreateMenuButton(_menuPanel.transform, "删除物体", new Color(0.8f, 0.25f, 0.25f), OnDeleteClicked);
 
             _menuPanel.SetActive(false);
         }
@@ -141,9 +157,17 @@ namespace Morphis.ModelPlacement
         }
 
         /// <summary>
-        /// Show the context menu at mouse position for a specific object
+        /// Show the context menu at mouse position for a specific object (backward-compatible)
         /// </summary>
         public void ShowMenu(GameObject target, Action onMoveSelected, Action onMessageSelected)
+        {
+            ShowMenu(target, onMoveSelected, null, null, onMessageSelected, null);
+        }
+
+        /// <summary>
+        /// Show the context menu with all options
+        /// </summary>
+        public void ShowMenu(GameObject target, Action onMoveSelected, Action onRotateSelected, Action onScaleSelected, Action onMessageSelected, Action onDeleteSelected = null)
         {
             if (_menuPanel == null)
             {
@@ -152,26 +176,43 @@ namespace Morphis.ModelPlacement
 
             _targetObject = target;
             _onMoveSelected = onMoveSelected;
+            _onRotateSelected = onRotateSelected;
+            _onScaleSelected = onScaleSelected;
             _onMessageSelected = onMessageSelected;
+            _onDeleteSelected = onDeleteSelected;
             
             // Toggle buttons
             if (_moveBtn != null) _moveBtn.SetActive(onMoveSelected != null);
+            if (_rotateBtn != null) _rotateBtn.SetActive(onRotateSelected != null);
+            if (_scaleBtn != null) _scaleBtn.SetActive(onScaleSelected != null);
             if (_messageBtn != null) _messageBtn.SetActive(onMessageSelected != null);
+            if (_deleteBtn != null) _deleteBtn.SetActive(onDeleteSelected != null);
             
             // Adjust height based on active buttons
             float height = 16; // Padding
             if (onMoveSelected != null) height += 36 + 6;
+            if (onRotateSelected != null) height += 36 + 6;
+            if (onScaleSelected != null) height += 36 + 6;
             if (onMessageSelected != null) height += 36 + 6;
+            if (onDeleteSelected != null) height += 36 + 6;
             _menuRect.sizeDelta = new Vector2(_menuRect.sizeDelta.x, height);
+
+            // Force layout rebuild so sizeDelta is accurate immediately
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_menuRect);
 
             // Position menu at mouse
             Vector2 mousePos = GetMousePosition();
+            
+            // Adjust position so the top-left pivot starts exactly at the mouse pointer
+            // We use RectTransformUtility to convert screen point to local point if needed,
+            // but since canvas is overlay, raw screen position works directly.
             _menuRect.position = mousePos;
 
-            // Ensure menu stays on screen
+            // Ensure menu stays on screen after layout rebuild
             ClampMenuToScreen();
 
             _menuPanel.SetActive(true);
+            GameplayInputBlocker.SetBlocked(this, true);
             Debug.Log($"[ContextMenu] Showing menu for {target.name}");
         }
 
@@ -184,9 +225,13 @@ namespace Morphis.ModelPlacement
             {
                 _menuPanel.SetActive(false);
             }
+            GameplayInputBlocker.SetBlocked(this, false);
             _targetObject = null;
             _onMoveSelected = null;
+            _onRotateSelected = null;
+            _onScaleSelected = null;
             _onMessageSelected = null;
+            _onDeleteSelected = null;
         }
 
         private void OnMoveClicked()
@@ -196,10 +241,31 @@ namespace Morphis.ModelPlacement
             HideMenu();
         }
 
+        private void OnRotateClicked()
+        {
+            Debug.Log($"[ContextMenu] Rotate selected for {_targetObject?.name}");
+            _onRotateSelected?.Invoke();
+            HideMenu();
+        }
+
+        private void OnScaleClicked()
+        {
+            Debug.Log($"[ContextMenu] Scale selected for {_targetObject?.name}");
+            _onScaleSelected?.Invoke();
+            HideMenu();
+        }
+
         private void OnMessageClicked()
         {
             Debug.Log($"[ContextMenu] Message selected for {_targetObject?.name}");
             _onMessageSelected?.Invoke();
+            HideMenu();
+        }
+
+        private void OnDeleteClicked()
+        {
+            Debug.Log($"[ContextMenu] Delete selected for {_targetObject?.name}");
+            _onDeleteSelected?.Invoke();
             HideMenu();
         }
 
@@ -219,7 +285,14 @@ namespace Morphis.ModelPlacement
             var screenHeight = Screen.height;
 
             var pos = _menuRect.position;
-            var size = _menuRect.sizeDelta;
+            
+            // Give RectTransform a layout pass if size is 0
+            if (_menuRect.rect.width == 0 || _menuRect.rect.height == 0)
+            {
+                LayoutRebuilder.ForceRebuildLayoutImmediate(_menuRect);
+            }
+            
+            var size = new Vector2(_menuRect.rect.width, _menuRect.rect.height);
 
             // Clamp to screen
             if (pos.x + size.x > screenWidth)
@@ -255,6 +328,16 @@ namespace Morphis.ModelPlacement
                     }
                 }
             }
+        }
+
+        private void OnDisable()
+        {
+            GameplayInputBlocker.SetBlocked(this, false);
+        }
+
+        private void OnDestroy()
+        {
+            GameplayInputBlocker.SetBlocked(this, false);
         }
     }
 }

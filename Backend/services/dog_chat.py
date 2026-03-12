@@ -4,13 +4,14 @@ Dog Chat Service - Vertex AI Integration
 Provides chat functionality with a virtual dog companion using Google Cloud Vertex AI.
 """
 import os
+import re
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 
 # Vertex AI 配置
 PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "project-296af11f-afb9-44ba-a98")
 LOCATION = os.getenv("VERTEX_LOCATION", "global")
-MODEL_ID = os.getenv("VERTEX_MODEL_ID", "moonshotai/kimi-k2-thinking-maas")
+MODEL_ID = os.getenv("VERTEX_MODEL_ID", "qwen/qwen3-235b-a22b-instruct-2507-maas")
 
 # System prompt for the dog personality
 DOG_SYSTEM_PROMPT = """You are Buddy, a friendly and enthusiastic virtual dog companion in a 3D world game. 
@@ -21,7 +22,9 @@ Personality traits:
 - Loyal and supportive to your human friend
 - Sometimes gets distracted by mentions of treats, walks, or squirrels
 - Uses simple language but can be insightful
-- Add relevant emojis occasionally (🐕, 🦴, 🎾, ❤️)
+
+IMPORTANT: Do NOT use emoji characters. Use text emoticons like <3, :), :D, or descriptive actions like *wags tail* instead.
+You can respond in Chinese if the user speaks Chinese.
 
 Keep responses concise (1-3 sentences typically) unless asked for detailed information.
 Never break character - you are always Buddy the dog."""
@@ -77,7 +80,8 @@ def get_openai_client():
             
         client = OpenAI(
             api_key=token,
-            base_url=base_url
+            base_url=base_url,
+            timeout=15.0  # 15 second timeout to prevent hanging
         )
         return client
     except ImportError:
@@ -134,6 +138,7 @@ def chat_with_dog(message: str, session_id: str = "default", dog_name: str = "Bu
         )
         
         assistant_message = response.choices[0].message.content.strip()
+        assistant_message = _strip_emoji(assistant_message)
         
         # Add assistant response to history
         _conversation_history[session_id].append({
@@ -156,31 +161,55 @@ def _get_placeholder_response(message: str, dog_name: str = "Buddy") -> str:
     message_lower = message.lower()
     
     if "hello" in message_lower or "hi" in message_lower:
-        return f"*wags tail excitedly* Woof! Hello friend! I'm {dog_name}! 🐕"
+        return f"*wags tail excitedly* Woof! Hello friend! I'm {dog_name}!"
     if "good" in message_lower and "boy" in message_lower:
-        return "*spins in circles* Woof woof! Thank you! ❤️"
+        return "*spins in circles* Woof woof! Thank you! <3"
     if "treat" in message_lower or "food" in message_lower:
-        return "*ears perk up* Did someone say treats?! 🦴"
+        return "*ears perk up* Did someone say treats?!"
     if "walk" in message_lower:
-        return "*runs to the door* Walk?! WALK?! Let's go! 🐕"
+        return "*runs to the door* Walk?! WALK?! Let's go!"
     if "love" in message_lower:
-        return "*licks your face* I love you too, human! ❤️"
+        return "*licks your face* I love you too, human! <3"
     if "sit" in message_lower:
         return "*sits down proudly* Look at me! I'm a good boy!"
     if "play" in message_lower:
-        return "*brings a ball* Throw it! Throw it! 🎾"
+        return "*brings a ball* Throw it! Throw it!"
     if "name" in message_lower:
-        return f"*tail wagging* My name is {dog_name}! Nice to meet you! 🐕"
+        return f"*tail wagging* My name is {dog_name}! Nice to meet you!"
     
     responses = [
         "*wags tail* Woof! *tilts head curiously*",
-        "*happy panting* Bark bark! 🐕",
+        "*happy panting* Bark bark!",
         "*sniffs around* Interesting... tell me more!",
-        "*rolls over* Belly rubs? 🐕",
-        "*playful bark* Woof woof! ❤️"
+        "*rolls over* Belly rubs?",
+        "*playful bark* Woof woof! <3"
     ]
     
     return random.choice(responses)
+
+
+def _strip_emoji(text: str) -> str:
+    """Remove emoji characters that TextMeshPro cannot render."""
+    # Matches most emoji: emoticons, symbols, dingbats, transport, flags, etc.
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map
+        "\U0001F1E0-\U0001F1FF"  # flags
+        "\U0001F900-\U0001F9FF"  # supplemental symbols
+        "\U0001FA00-\U0001FA6F"  # chess symbols
+        "\U0001FA70-\U0001FAFF"  # symbols extended-A
+        "\U00002702-\U000027B0"  # dingbats
+        "\U0000FE00-\U0000FE0F"  # variation selectors
+        "\U0000200D"             # zero width joiner
+        "\U000025A0-\U000025FF"  # geometric shapes
+        "\U00002600-\U000026FF"  # misc symbols
+        "\U00002300-\U000023FF"  # misc technical
+        "]+",
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub("", text).strip()
 
 
 def clear_conversation(session_id: str = "default"):

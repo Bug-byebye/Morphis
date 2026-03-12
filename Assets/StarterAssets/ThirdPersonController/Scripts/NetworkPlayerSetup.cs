@@ -85,6 +85,12 @@ namespace StarterAssets
                 DisableRemotePlayerComponents();
                 Debug.Log($"[NetworkPlayerSetup] Remote player input/camera disabled: {gameObject.name}");
             }
+            else
+            {
+                // Safety: ensure local player always has components enabled
+                EnableComponents(true);
+                Debug.Log($"[NetworkPlayerSetup] Local player components ensured enabled: {gameObject.name}");
+            }
         }
 
         /// <summary>

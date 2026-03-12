@@ -19,7 +19,7 @@ namespace AIPipeline.Nodes
         
         private void Awake()
         {
-            nodeName = "Text to 3D";
+            nodeName = "文生3D";
             nodeColor = new Color(1f, 0.6f, 0.8f); // 粉色
         }
         

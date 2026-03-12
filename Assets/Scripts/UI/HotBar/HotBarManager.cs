@@ -351,7 +351,7 @@ namespace Morphis.UI.HotBar
             EnsureColliderFromRenderers(root);
             NormalizeScaleAndSnapToGround(root, groundY, targetSize: 1.0f);
             EnsurePlaceableComponents(root);
-            WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(root, $"glb:{displayName}");
+            WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(root, $"{resourcesPath}/{displayName}");
         }
 
         private void EnsurePlaceableComponents(GameObject go)

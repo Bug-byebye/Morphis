@@ -34,11 +34,18 @@ namespace AIPipeline.UI
         private List<ConnectionLine> connections = new List<ConnectionLine>();
         
         private bool isVisible = false;
+        /// <summary>Whether the workflow station editor is currently open (blocks world clicks).</summary>
+        public static bool IsEditorOpen => Instance != null && Instance.isVisible;
         private CursorLockMode savedLockMode;
         private bool savedCursorVisible;
-        private PlayerInput playerInput;
         private Canvas mainCanvas;
         private Vector2 lastClickPos;
+
+        /// <summary>Always find the current PlayerInput fresh — never cache across scenes.</summary>
+        private PlayerInput FindPlayerInput()
+        {
+            return FindObjectOfType<PlayerInput>();
+        }
 
         [Header("Main UI")]
         [SerializeField] private GameObject mainUICanvas;
@@ -90,8 +97,6 @@ namespace AIPipeline.UI
 
             if (this == null) yield break;
 
-            playerInput = FindObjectOfType<PlayerInput>();
-            
             // Re-check canvases if we are persisting
             if (mainCanvas == null) CreateEditorUI();
             if (mainUICanvas == null) CreateMainUI();
@@ -100,7 +105,7 @@ namespace AIPipeline.UI
                 editorRoot.SetActive(false);
             
             // Ensure player input is enabled at start
-            if (playerInput != null) playerInput.enabled = true;
+            SetAllPlayerInputEnabled(true);
             
             Debug.Log("[SimpleNodeEditor] Ready! Press Tab or Button to open.");
         }
@@ -174,7 +179,7 @@ namespace AIPipeline.UI
             txtObj.transform.SetParent(btnObj.transform, false);
             
             TextMeshProUGUI txt = txtObj.AddComponent<TextMeshProUGUI>();
-            txt.text = "Workflow Station";
+            txt.text = "工作台";
             txt.fontSize = 18;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = Color.white;
@@ -258,18 +263,18 @@ namespace AIPipeline.UI
                 savedCursorVisible = Cursor.visible;
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
-                if (playerInput != null) playerInput.enabled = false;
+                SetAllPlayerInputEnabled(false);
                 
-                if (workflowStationButtonText != null) workflowStationButtonText.text = "Close Workflow";
+                if (workflowStationButtonText != null) workflowStationButtonText.text = "关闭工作台";
             }
             else
             {
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
-                if (playerInput != null) playerInput.enabled = true;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                SetAllPlayerInputEnabled(true);
                 if (contextMenu != null) contextMenu.SetActive(false);
                 
-                if (workflowStationButtonText != null) workflowStationButtonText.text = "Workflow Station";
+                if (workflowStationButtonText != null) workflowStationButtonText.text = "工作台";
             }
             
             editorRoot.SetActive(isVisible);
@@ -293,12 +298,57 @@ namespace AIPipeline.UI
             }
             else
             {
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
-                Debug.Log("[NodeEditor] Mouse cursor disabled. Press M to enable.");
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                Debug.Log("[NodeEditor] Mouse cursor mode toggled off (cursor stays visible).");
             }
         }
         
+        /// <summary>
+        /// Enable or disable ALL PlayerInput components in the scene.
+        /// Uses a fresh search every time — never stale references.
+        /// </summary>
+        private void SetAllPlayerInputEnabled(bool enabled)
+        {
+            var allInputs = FindObjectsByType<PlayerInput>(FindObjectsSortMode.None);
+            foreach (var pi in allInputs)
+            {
+                if (pi != null) pi.enabled = enabled;
+            }
+        }
+
+        /// <summary>
+        /// Safety net: if the editor is NOT visible, ensure all player movement components are enabled.
+        /// Prevents getting stuck with disabled input due to stale references or errors.
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!isVisible)
+            {
+                // Find the local player's PlayerInput and ensure ALL movement components are enabled
+                var pi = FindPlayerInput();
+                if (pi == null) return;
+
+                bool anyFixed = false;
+
+                if (!pi.enabled) { pi.enabled = true; anyFixed = true; }
+
+                var inputs = pi.GetComponent<StarterAssets.StarterAssetsInputs>();
+                if (inputs != null && !inputs.enabled) { inputs.enabled = true; anyFixed = true; }
+
+                var tpc = pi.GetComponent<StarterAssets.ThirdPersonController>();
+                if (tpc != null && !tpc.enabled) { tpc.enabled = true; anyFixed = true; }
+
+                var cc = pi.GetComponent<CharacterController>();
+                if (cc != null && !cc.enabled) { cc.enabled = true; anyFixed = true; }
+
+                if (anyFixed)
+                {
+                    Debug.LogWarning("[SimpleNodeEditor] Safety: Re-enabled movement components that were stuck disabled.");
+                }
+            }
+        }
+
         private void CreateEditorUI()
         {
             // 主 Canvas
@@ -374,12 +424,8 @@ namespace AIPipeline.UI
             toolbarRect.anchorMin = new Vector2(0, 0);
             toolbarRect.anchorMax = new Vector2(1, 0);
             toolbarRect.pivot = new Vector2(0.5f, 0);
-            // 使用屏幕高度的百分比作为工具栏高度（约 5%）
-            toolbarRect.sizeDelta = new Vector2(0, 0);
+            toolbarRect.sizeDelta = new Vector2(0, 70);
             toolbarRect.anchoredPosition = Vector2.zero;
-            // 设置高度为屏幕的 6%
-            var toolbarFitter = toolbar.AddComponent<ContentSizeFitter>();
-            toolbarFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             
             Image tbBg = toolbar.AddComponent<Image>();
             tbBg.color = new Color(0.15f, 0.15f, 0.2f, 1f);
@@ -394,10 +440,10 @@ namespace AIPipeline.UI
             layout.childControlHeight = true;
             
             // Execute 按钮
-            CreateButton(toolbar.transform, "Execute", new Color(0.3f, 0.7f, 0.4f), OnExecuteClicked);
+            CreateButton(toolbar.transform, "执行", new Color(0.3f, 0.7f, 0.4f), OnExecuteClicked);
             
             // Clear 按钮
-            CreateButton(toolbar.transform, "Clear", new Color(0.7f, 0.3f, 0.3f), OnClearClicked);
+            CreateButton(toolbar.transform, "清空", new Color(0.7f, 0.3f, 0.3f), OnClearClicked);
             
             // Connect 按钮 - Removed in favor of drag-connect
             // CreateButton(toolbar.transform, "Connect", new Color(0.5f, 0.5f, 0.7f), OnConnectClicked);
@@ -410,7 +456,7 @@ namespace AIPipeline.UI
             le.minWidth = 100;
             
             statusText = statusObj.AddComponent<TextMeshProUGUI>();
-            statusText.text = "Right-click to add nodes";
+            statusText.text = "右键添加节点";
             statusText.fontSize = 18;
             statusText.enableAutoSizing = true;
             statusText.fontSizeMin = 14;
@@ -479,14 +525,14 @@ namespace AIPipeline.UI
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
             
-            CreateMenuLabel(contextMenu.transform, "Add Node");
-            CreateMenuItem(contextMenu.transform, "Text Input", "TextInput");
-            CreateMenuItem(contextMenu.transform, "Image Input", "ImageInput");
-            CreateMenuItem(contextMenu.transform, "Text to Image", "Text2Image");
-            CreateMenuItem(contextMenu.transform, "Image to Image", "Image2Image");
-            CreateMenuItem(contextMenu.transform, "Image to 3D", "Image23D");
-            CreateMenuItem(contextMenu.transform, "Text to 3D", "Text23D");
-            CreateMenuItem(contextMenu.transform, "Preview", "Preview");
+            CreateMenuLabel(contextMenu.transform, "添加节点");
+            CreateMenuItem(contextMenu.transform, "文字输入", "TextInput");
+            CreateMenuItem(contextMenu.transform, "图片输入", "ImageInput");
+            CreateMenuItem(contextMenu.transform, "文生图", "Text2Image");
+            CreateMenuItem(contextMenu.transform, "图生图", "Image2Image");
+            CreateMenuItem(contextMenu.transform, "图生3D", "Image23D");
+            CreateMenuItem(contextMenu.transform, "文生3D", "Text23D");
+            CreateMenuItem(contextMenu.transform, "预览", "Preview");
             
             contextMenu.SetActive(false);
         }
@@ -835,7 +881,7 @@ namespace AIPipeline.UI
             StretchToFill(placeholderObj.AddComponent<RectTransform>());
             
             var placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
-            placeholderText.text = "Preview\n(waiting for image)";
+            placeholderText.text = "预览\n(等待图片)";
             placeholderText.fontSize = 18; // 更大的字体
             placeholderText.color = new Color(0.5f, 0.5f, 0.5f);
             placeholderText.alignment = TextAlignmentOptions.Center;
@@ -875,7 +921,7 @@ namespace AIPipeline.UI
             var ph = new GameObject("Placeholder").AddComponent<TextMeshProUGUI>();
             ph.transform.SetParent(textArea.transform, false);
             StretchToFill(ph.GetComponent<RectTransform>());
-            ph.text = "Enter prompt...";
+            ph.text = "输入提示词...";
             ph.fontSize = 20;
             ph.fontStyle = FontStyles.Italic;
             ph.color = new Color(0.5f, 0.5f, 0.5f);
@@ -1791,7 +1837,7 @@ namespace AIPipeline.UI
             GameObject placeTextObj = new GameObject("Text");
             placeTextObj.transform.SetParent(placeObj.transform, false);
             var placeText = placeTextObj.AddComponent<TextMeshProUGUI>();
-            placeText.text = "Place";
+            placeText.text = "放置";
             placeText.fontSize = 11;
             placeText.alignment = TextAlignmentOptions.Center;
             placeText.color = Color.white;
@@ -1816,7 +1862,7 @@ namespace AIPipeline.UI
             GameObject bagTextObj = new GameObject("Text");
             bagTextObj.transform.SetParent(bagObj.transform, false);
             var bagText = bagTextObj.AddComponent<TextMeshProUGUI>();
-            bagText.text = "Add to Bag";
+            bagText.text = "加入背包";
             bagText.fontSize = 11;
             bagText.alignment = TextAlignmentOptions.Center;
             bagText.color = Color.white;

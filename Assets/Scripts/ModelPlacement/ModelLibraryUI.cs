@@ -58,7 +58,7 @@ namespace Morphis.ModelPlacement
             canvasGO.AddComponent<GraphicRaycaster>();
 
             // Left toggle button
-            _toggleBtn = CreateButton(_canvas.transform, "Models", new Color(0.22f, 0.55f, 0.95f));
+            _toggleBtn = CreateButton(_canvas.transform, "模型", new Color(0.22f, 0.55f, 0.95f));
             var btnRt = _toggleBtn.GetComponent<RectTransform>();
             btnRt.anchorMin = new Vector2(0, 0.5f);
             btnRt.anchorMax = new Vector2(0, 0.5f);
@@ -82,7 +82,7 @@ namespace Morphis.ModelPlacement
             panelGO.AddComponent<Outline>().effectColor = new Color(0.2f, 0.6f, 1f, 0.35f);
 
             // Title
-            var title = CreateText(panelGO.transform, "Model Library", 18, FontStyles.Bold);
+            var title = CreateText(panelGO.transform, "模型库", 18, FontStyles.Bold);
             var titleRt = title.GetComponent<RectTransform>();
             titleRt.anchorMin = new Vector2(0, 1);
             titleRt.anchorMax = new Vector2(1, 1);
@@ -403,7 +403,7 @@ namespace Morphis.ModelPlacement
             NormalizeScale(root, targetSize: 1.0f);
             SnapToGround(root, targetBaseY);
             EnsurePlaceableComponents(root);
-            EnsureWorldObjectForSnapshot(root, $"glb:{displayName}");
+            EnsureWorldObjectForSnapshot(root, $"{resourcesPath}/{displayName}");
 
             Debug.Log($"[ModelLibrary] Placed GLB: {displayName} at {worldPos}");
         }
@@ -771,4 +771,3 @@ namespace Morphis.ModelPlacement
         }
     }
 }
-

@@ -6740,6 +6740,7 @@ MonoBehaviour:
   walkAnimId: 1
   runAnimId: 3
   dogName: Buddy
+  huggingFaceApiToken: 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
 --- !u!195 &846381275
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -10651,6 +10652,37 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 5788968203526145160, guid: f8ccaa39b2ab7414796d8eaab4b7bb81, type: 3}
   m_PrefabInstance: {fileID: 1394605441}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &1394909553
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1394909554}
+  m_Layer: 0
+  m_Name: Spawn Point
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1394909554
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1394909553}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -12.75284, y: 0.16136, z: -3.75616}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &1402827283
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -17254,3 +17286,4 @@ SceneRoots:
   - {fileID: 1970601059}
   - {fileID: 2034842174}
   - {fileID: 1650611135}
+  - {fileID: 1394909554}
