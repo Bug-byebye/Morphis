@@ -4,14 +4,17 @@ namespace Morphis.Motion
 {
     /// <summary>
     /// Auto-creates runtime MDM generation UI.
+    /// Disabled by default because this panel is for local testing.
     /// </summary>
     public static class MDMMotionGenerateUIBootstrap
     {
         private static bool created;
+        private const bool EnableRuntimeUI = false;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void EnsureUI()
         {
+            if (!EnableRuntimeUI) return;
             if (created) return;
 
             if (Object.FindFirstObjectByType<MDMMotionGenerateUI>() != null)
