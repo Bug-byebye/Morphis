@@ -448,6 +448,7 @@ async def root():
             "POST /auth/register": "注册（写入 User + 默认 World）",
             "GET /workspaces": "List workspaces (World + WorldMember)",
             "POST /workspaces/create": "Create workspace with optional co-owners",
+            "POST /workspaces/join": "Join workspace and get server address",
             "POST /world/{world_id}": "创建或更新世界快照",
             "GET /world/{world_id}": "获取世界快照",
             "POST /text2image": "文字生成图片 (返回 PNG)",
@@ -461,7 +462,7 @@ async def root():
     }
 
 
-if __name__ == "__main__":
+if False and __name__ == "__main__":
     import uvicorn
     print("=" * 50)
     print("AI Generation Pipeline Server")
