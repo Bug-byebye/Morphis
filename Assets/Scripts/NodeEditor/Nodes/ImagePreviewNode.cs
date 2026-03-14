@@ -28,7 +28,7 @@ namespace AIPipeline.Nodes
         
         private void Awake()
         {
-            nodeName = "Image Preview";
+            nodeName = "图片预览";
             nodeColor = new Color(0.4f, 0.9f, 0.7f); // 青绿色
         }
         

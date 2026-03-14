@@ -1,4 +1,5 @@
 using UnityEngine;
+using Morphis.InputControl;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -17,10 +18,11 @@ namespace StarterAssets
 		public bool analogMovement;
 
 		[Header("Mouse Cursor Settings")]
-		public bool cursorLocked = true;
+		public bool cursorLocked = false;
 		public bool cursorInputForLook = true;
 
 #if ENABLE_INPUT_SYSTEM
+		// For Send Messages mode
 		public void OnMove(InputValue value)
 		{
 			MoveInput(value.Get<Vector2>());
@@ -43,40 +45,84 @@ namespace StarterAssets
 		{
 			SprintInput(value.isPressed);
 		}
+
+		// For Invoke Unity Events mode (used by PlayerArmature prefab)
+		public void InputMove(InputAction.CallbackContext context)
+		{
+			MoveInput(context.ReadValue<Vector2>());
+		}
+
+		public void InputLook(InputAction.CallbackContext context)
+		{
+			if(cursorInputForLook)
+			{
+				LookInput(context.ReadValue<Vector2>());
+			}
+		}
+
+		public void InputJump(InputAction.CallbackContext context)
+		{
+			JumpInput(context.performed);
+		}
+
+		public void InputSprint(InputAction.CallbackContext context)
+		{
+			SprintInput(context.performed);
+		}
 #endif
 
 
 		public void MoveInput(Vector2 newMoveDirection)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				move = Vector2.zero;
+				return;
+			}
 			move = newMoveDirection;
 		} 
 
 		public void LookInput(Vector2 newLookDirection)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				look = Vector2.zero;
+				return;
+			}
 			look = newLookDirection;
 		}
 
 		public void JumpInput(bool newJumpState)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				jump = false;
+				return;
+			}
 			jump = newJumpState;
 		}
 
 		public void SprintInput(bool newSprintState)
 		{
+			if (GameplayInputBlocker.IsBlocked)
+			{
+				sprint = false;
+				return;
+			}
 			sprint = newSprintState;
+		}
+
+		private void Update()
+		{
+			if (!GameplayInputBlocker.IsBlocked) return;
+			move = Vector2.zero;
+			look = Vector2.zero;
+			jump = false;
+			sprint = false;
 		}
 
 		private void OnApplicationFocus(bool hasFocus)
 		{
-			// Don't lock cursor if Boot UI canvas is active (login/workspace selection)
-			var bootCanvas = GameObject.Find("BootCanvas");
-			if (bootCanvas != null && bootCanvas.activeInHierarchy)
-			{
-				// Boot UI is showing, keep cursor unlocked
-				Cursor.lockState = CursorLockMode.None;
-				Cursor.visible = true;
-				return;
-			}
 			SetCursorState(cursorLocked);
 		}
 

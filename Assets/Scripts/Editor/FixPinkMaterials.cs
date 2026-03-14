@@ -1,12 +1,28 @@
 using UnityEngine;
 using UnityEditor;
+using System.Collections.Generic;
 
 public class FixPinkMaterials
 {
     [MenuItem("Tools/Fix Pink Materials")]
     public static void Fix()
     {
-        string[] guids = AssetDatabase.FindAssets("t:Material", new[] { "Assets/Lowpoly_Holiday_House" });
+        // 要修复的文件夹列表
+        string[] folders = new string[] 
+        { 
+            "Assets/Lowpoly_Holiday_House",
+            "Assets/contemporary house"
+        };
+        
+        List<string> allGuids = new List<string>();
+        foreach (string folder in folders)
+        {
+            if (AssetDatabase.IsValidFolder(folder))
+            {
+                string[] guids = AssetDatabase.FindAssets("t:Material", new[] { folder });
+                allGuids.AddRange(guids);
+            }
+        }
         
         // Find URP shaders
         Shader urpLit = Shader.Find("Universal Render Pipeline/Lit");
@@ -21,7 +37,7 @@ public class FixPinkMaterials
         }
 
         int count = 0;
-        foreach (string guid in guids)
+        foreach (string guid in allGuids)
         {
             string path = AssetDatabase.GUIDToAssetPath(guid);
             Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
@@ -36,7 +52,7 @@ public class FixPinkMaterials
                 }
                 else if (path.Contains("Skybox")) 
                 {
-                    // Skip
+                    // Skip skybox materials
                 }
                 else
                 {
@@ -62,6 +78,6 @@ public class FixPinkMaterials
             }
         }
         AssetDatabase.SaveAssets();
-        Debug.Log($"Fixed {count} materials in Lowpoly_Holiday_House");
+        Debug.Log($"Fixed {count} materials in asset packs");
     }
 }

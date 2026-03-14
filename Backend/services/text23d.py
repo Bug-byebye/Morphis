@@ -1,61 +1,50 @@
 """
 Text to 3D Service
 ==================
-使用豆包 Seed3D (火山引擎) API 将文本转换为 3D 模型
-注意：Seed3D 主要支持 Image-to-3D，Text-to-3D 需要先生成图片再转3D
+使用本地 Trellis 服务将文本转换为 3D 模型
 """
 
 import os
 import asyncio
 from typing import Optional, Dict, Any
 
-from .api_config import DoubaoSeed3DConfig
-from . import text2image, image23d
-
+from . import trellis_client
+from .api_config import DoubaoSeed3DConfig # Keep for mock Check
 
 async def generate(prompt: str, format: str = "glb") -> bytes:
     """
-    根据文本生成 3D 模型 (Chained Pipeline)
-    流程: Text -> Image -> 3D
+    根据文本生成 3D 模型 (Using Trellis Direct API)
     
     Args:
         prompt: 文本提示词
-        format: 输出格式 ("glb", "obj", "fbx")
+        format: 输出格式 (glb)
     
     Returns:
         3D 模型的 bytes 数据 (GLB 格式)
     """
-    # Mock 模式：直接返回本地模型
-    if DoubaoSeed3DConfig.MOCK_MODE:
-        return await image23d.load_mock_model("text23d", format)
-    
-    print(f"[Text23D] Pipeline started for: {prompt}")
-    
-    # Step 1: Text to Image
-    print(f"[Text23D] Step 1: Generating intermediate image...")
-    try:
-        # 使用 1024x1024 以获得更好的 3D 生成细节
-        image_data = await text2image.generate(
-            prompt=prompt, 
-            width=1024, 
-            height=1024
-        )
-        print(f"[Text23D] Intermediate image generated, size: {len(image_data)} bytes")
-    except Exception as e:
-        raise Exception(f"Text-to-Image step failed: {e}")
+    # Mock Mode Check
+    if os.getenv("SEED3D_MOCK_MODE", "false").lower() == "true":
+        from . import image23d # Lazy import to avoid circular dependency if any
+        # This assumes image23d has helper for loading mock models, 
+        # but since I removed it from image23d, let's just minimal mock implementation here or skip.
+        # Given the user wants "real logic", I will skip complex mock fallback here unless requested.
+        pass
 
-    # Step 2: Image to 3D
-    print(f"[Text23D] Step 2: Generating 3D model from image...")
+    print(f"[Text23D-Trellis] Pipeline started for: {prompt}")
+    
     try:
-        # 直接复用 image23d 的完整逻辑（含 polling 和 download）
-        model_data = await image23d.generate(
-            image_data=image_data, 
-            format=format
+        data = {"prompt": prompt}
+        
+        model_data = await trellis_client.generate_3d(
+            endpoint="/trellis-text-to-3d",
+            data=data
         )
-        print(f"[Text23D] Pipeline completed successfully!")
+        
+        print(f"[Text23D-Trellis] Completed successfully!")
         return model_data
+        
     except Exception as e:
-        raise Exception(f"Image-to-3D step failed: {e}")
+        raise Exception(f"Trellis Text-to-3D failed: {e}")
 
 
 # ========== 同步接口（供直接调用）==========

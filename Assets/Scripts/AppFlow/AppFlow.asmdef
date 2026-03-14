@@ -1,0 +1,19 @@
+{
+  "name": "Morphis.AppFlow",
+  "rootNamespace": "Morphis.AppFlow",
+  "references": [
+    "Morphis.Config",
+    "Unity.TextMeshPro",
+    "Mirror",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

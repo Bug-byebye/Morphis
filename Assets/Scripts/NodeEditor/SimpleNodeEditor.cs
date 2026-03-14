@@ -15,13 +15,13 @@ namespace AIPipeline.UI
     public class SimpleNodeEditor : MonoBehaviour
     {
         [Header("Settings")]
-        public string baseUrl = "http://localhost:8000";
+        public string baseUrl = "";
         
         // API 端点
-        private string Text2ImageUrl => $"{baseUrl}/text2image/urls";
-        private string Image2ImageUrl => $"{baseUrl}/image2image";
-        private string Image23DUrl => $"{baseUrl}/image23d";
-        private string Text23DUrl => $"{baseUrl}/text23d";
+        private string Text2ImageUrl => $"{GetBaseUrl()}/text2image/urls";
+        private string Image2ImageUrl => $"{GetBaseUrl()}/image2image";
+        private string Image23DUrl => $"{GetBaseUrl()}/image23d";
+        private string Text23DUrl => $"{GetBaseUrl()}/text23d";
         
         // UI 元素
         private GameObject editorRoot;
@@ -34,11 +34,18 @@ namespace AIPipeline.UI
         private List<ConnectionLine> connections = new List<ConnectionLine>();
         
         private bool isVisible = false;
+        /// <summary>Whether the workflow station editor is currently open (blocks world clicks).</summary>
+        public static bool IsEditorOpen => Instance != null && Instance.isVisible;
         private CursorLockMode savedLockMode;
         private bool savedCursorVisible;
-        private PlayerInput playerInput;
         private Canvas mainCanvas;
         private Vector2 lastClickPos;
+
+        /// <summary>Always find the current PlayerInput fresh — never cache across scenes.</summary>
+        private PlayerInput FindPlayerInput()
+        {
+            return FindObjectOfType<PlayerInput>();
+        }
 
         [Header("Main UI")]
         [SerializeField] private GameObject mainUICanvas;
@@ -51,27 +58,54 @@ namespace AIPipeline.UI
         // 连接模式
         private bool isConnecting = false;
         private NodeData connectingFromNode;
+        private string connectingToPortID; // Track which input port we are targetting? No, we start FROM output.
+        // We only need to know target port when we click Input input.
         
         // Pipeline 错误标记
         private bool pipelineHasError = false;
         
+        // Singleton Implementation
+        public static SimpleNodeEditor Instance { get; private set; }
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
+        private string GetBaseUrl()
+        {
+            if (!string.IsNullOrEmpty(baseUrl))
+                return baseUrl;
+
+            return Morphis.Config.AppConfig.Instance.ApiBaseUrl;
+        }
+
         IEnumerator Start()
         {
             // Wait for BootCanvas to disappear (login flow clear)
             while (GameObject.Find("BootCanvas") != null)
             {
                 yield return null;
+                if (this == null) yield break; // Safety check if object destroyed during wait
             }
 
-            playerInput = FindObjectOfType<PlayerInput>();
-            CreateEditorUI();
-            CreateMainUI();
+            if (this == null) yield break;
+
+            // Re-check canvases if we are persisting
+            if (mainCanvas == null) CreateEditorUI();
+            if (mainUICanvas == null) CreateMainUI();
             
             if (editorRoot != null)
                 editorRoot.SetActive(false);
             
             // Ensure player input is enabled at start
-            if (playerInput != null) playerInput.enabled = true;
+            SetAllPlayerInputEnabled(true);
             
             Debug.Log("[SimpleNodeEditor] Ready! Press Tab or Button to open.");
         }
@@ -79,50 +113,44 @@ namespace AIPipeline.UI
         private void CreateMainUI()
         {
             // Detect and cleanup legacy duplicate buttons
-            // Users reported "OpenButton" persisting, so we aggressively destroy it if found.
             var legacyBtn = GameObject.Find("OpenButton");
             if (legacyBtn != null) 
             {
-                Debug.Log("[SimpleNodeEditor] Destroying legacy 'OpenButton' to prevent duplicates.");
                 Destroy(legacyBtn);
             }
 
             // Hide if in Boot Flow
             if (GameObject.Find("BootCanvas") != null) return;
 
-            // Check if Main UI already exists
+            // If we already have a UI but it was destroyed (scene load), recreate it
+            // Or if we are persistent, we keep it.
+            
+            if (mainUICanvas != null) return; // Already exists
+
+            // Check if Main UI already exists in scene (duplicate check)
             GameObject canvasObj = GameObject.Find("NodeEditor_MainUI");
             if (canvasObj != null)
             {
                 mainUICanvas = canvasObj;
-                Transform btnTrans = mainUICanvas.transform.Find("WorkflowStationButton"); // Updated name
-                if (btnTrans != null)
-                {
-                    workflowStationButton = btnTrans.GetComponent<Button>();
-                    workflowStationButtonText = btnTrans.GetComponentInChildren<TextMeshProUGUI>();
-                    if (workflowStationButton != null)
-                    {
-                        workflowStationButton.onClick.RemoveAllListeners();
-                        workflowStationButton.onClick.AddListener(ToggleEditor);
-                    }
-                }
-                else
-                {
-                     // If canvas exists but button doesn't (or has old name), destroy canvas to rebuild or just create button?
-                     // Safer to rebuild button.
-                     CreateWorkflowStationButton(canvasObj);
-                }
-                return;
+                // Re-bind button...
             }
+            else
+            {
+                // Create Canvas
+                // Create Canvas
+                canvasObj = new GameObject("NodeEditor_MainUI");
+                var canvas = canvasObj.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                canvas.sortingOrder = 200; // Ensure it's above the Editor Window (order 100)
+                
+                canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                canvasObj.AddComponent<GraphicRaycaster>();
+                mainUICanvas = canvasObj;
+                
+                DontDestroyOnLoad(canvasObj); // Persistent UI
 
-            // Create Canvas
-            canvasObj = new GameObject("NodeEditor_MainUI");
-            canvasObj.AddComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            canvasObj.AddComponent<GraphicRaycaster>();
-            mainUICanvas = canvasObj;
-
-            CreateWorkflowStationButton(canvasObj);
+                CreateWorkflowStationButton(canvasObj);
+            }
         }
 
         private void CreateWorkflowStationButton(GameObject canvasObj)
@@ -151,7 +179,7 @@ namespace AIPipeline.UI
             txtObj.transform.SetParent(btnObj.transform, false);
             
             TextMeshProUGUI txt = txtObj.AddComponent<TextMeshProUGUI>();
-            txt.text = "Workflow Station";
+            txt.text = "工作台";
             txt.fontSize = 18;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = Color.white;
@@ -165,51 +193,61 @@ namespace AIPipeline.UI
         
         void Update()
         {
-            if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
+            // Safety check: if UI is destroyed (e.g. scene change), stop updating references
+            if (this == null || editorRoot == null) return;
+
+            try
             {
-                ToggleEditor();
-            }
-            
-            // M 键切换鼠标显示（用于与场景物体交互）
-            if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame && !isVisible)
-            {
-                ToggleMouseCursor();
-            }
-            
-            if (!isVisible) return;
-            
-            // 右键菜单
-            if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
-            {
-                if (isConnecting)
+                if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
                 {
-                    // 取消连接
-                    isConnecting = false;
-                    connectingFromNode = null;
-                    UpdateStatus("Connection cancelled");
+                    ToggleEditor();
                 }
-                else
+                
+                // M 键切换鼠标显示（用于与场景物体交互）
+                if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame && !isVisible)
                 {
-                    ShowContextMenu(Mouse.current.position.ReadValue());
+                    ToggleMouseCursor();
                 }
-            }
-            
-            // 左键关闭菜单
-            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
-            {
-                if (contextMenu.activeSelf)
+                
+                if (!isVisible) return;
+                
+                // 右键菜单
+                if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                 {
-                    Vector2 mousePos = Mouse.current.position.ReadValue();
-                    RectTransform menuRect = contextMenu.GetComponent<RectTransform>();
-                    if (!RectTransformUtility.RectangleContainsScreenPoint(menuRect, mousePos, null))
+                    if (isConnecting)
                     {
-                        contextMenu.SetActive(false);
+                        // 取消连接
+                        isConnecting = false;
+                        connectingFromNode = null;
+                        UpdateStatus("Connection cancelled");
+                    }
+                    else
+                    {
+                        ShowContextMenu(Mouse.current.position.ReadValue());
                     }
                 }
+                
+                // 左键关闭菜单
+                if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    if (contextMenu != null && contextMenu.activeSelf)
+                    {
+                        Vector2 mousePos = Mouse.current.position.ReadValue();
+                        RectTransform menuRect = contextMenu.GetComponent<RectTransform>();
+                        if (!RectTransformUtility.RectangleContainsScreenPoint(menuRect, mousePos, null))
+                        {
+                            contextMenu.SetActive(false);
+                        }
+                    }
+                }
+                
+                // 更新连接线
+                UpdateConnectionLines();
             }
-            
-            // 更新连接线
-            UpdateConnectionLines();
+            catch (MissingReferenceException)
+            {
+                // Ignore errors during scene unload
+            }
         }
         
         public void ToggleEditor()
@@ -225,18 +263,18 @@ namespace AIPipeline.UI
                 savedCursorVisible = Cursor.visible;
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
-                if (playerInput != null) playerInput.enabled = false;
+                SetAllPlayerInputEnabled(false);
                 
-                if (workflowStationButtonText != null) workflowStationButtonText.text = "Close Workflow";
+                if (workflowStationButtonText != null) workflowStationButtonText.text = "关闭工作台";
             }
             else
             {
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
-                if (playerInput != null) playerInput.enabled = true;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                SetAllPlayerInputEnabled(true);
                 if (contextMenu != null) contextMenu.SetActive(false);
                 
-                if (workflowStationButtonText != null) workflowStationButtonText.text = "Workflow Station";
+                if (workflowStationButtonText != null) workflowStationButtonText.text = "工作台";
             }
             
             editorRoot.SetActive(isVisible);
@@ -260,12 +298,57 @@ namespace AIPipeline.UI
             }
             else
             {
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
-                Debug.Log("[NodeEditor] Mouse cursor disabled. Press M to enable.");
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                Debug.Log("[NodeEditor] Mouse cursor mode toggled off (cursor stays visible).");
             }
         }
         
+        /// <summary>
+        /// Enable or disable ALL PlayerInput components in the scene.
+        /// Uses a fresh search every time — never stale references.
+        /// </summary>
+        private void SetAllPlayerInputEnabled(bool enabled)
+        {
+            var allInputs = FindObjectsByType<PlayerInput>(FindObjectsSortMode.None);
+            foreach (var pi in allInputs)
+            {
+                if (pi != null) pi.enabled = enabled;
+            }
+        }
+
+        /// <summary>
+        /// Safety net: if the editor is NOT visible, ensure all player movement components are enabled.
+        /// Prevents getting stuck with disabled input due to stale references or errors.
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (!isVisible)
+            {
+                // Find the local player's PlayerInput and ensure ALL movement components are enabled
+                var pi = FindPlayerInput();
+                if (pi == null) return;
+
+                bool anyFixed = false;
+
+                if (!pi.enabled) { pi.enabled = true; anyFixed = true; }
+
+                var inputs = pi.GetComponent<StarterAssets.StarterAssetsInputs>();
+                if (inputs != null && !inputs.enabled) { inputs.enabled = true; anyFixed = true; }
+
+                var tpc = pi.GetComponent<StarterAssets.ThirdPersonController>();
+                if (tpc != null && !tpc.enabled) { tpc.enabled = true; anyFixed = true; }
+
+                var cc = pi.GetComponent<CharacterController>();
+                if (cc != null && !cc.enabled) { cc.enabled = true; anyFixed = true; }
+
+                if (anyFixed)
+                {
+                    Debug.LogWarning("[SimpleNodeEditor] Safety: Re-enabled movement components that were stuck disabled.");
+                }
+            }
+        }
+
         private void CreateEditorUI()
         {
             // 主 Canvas
@@ -280,6 +363,7 @@ namespace AIPipeline.UI
             mainCanvas = canvasObj.AddComponent<Canvas>();
             mainCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
             mainCanvas.sortingOrder = 100;
+            DontDestroyOnLoad(canvasObj); // Persistent Editor UI
             
             var scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -340,12 +424,8 @@ namespace AIPipeline.UI
             toolbarRect.anchorMin = new Vector2(0, 0);
             toolbarRect.anchorMax = new Vector2(1, 0);
             toolbarRect.pivot = new Vector2(0.5f, 0);
-            // 使用屏幕高度的百分比作为工具栏高度（约 5%）
-            toolbarRect.sizeDelta = new Vector2(0, 0);
+            toolbarRect.sizeDelta = new Vector2(0, 70);
             toolbarRect.anchoredPosition = Vector2.zero;
-            // 设置高度为屏幕的 6%
-            var toolbarFitter = toolbar.AddComponent<ContentSizeFitter>();
-            toolbarFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             
             Image tbBg = toolbar.AddComponent<Image>();
             tbBg.color = new Color(0.15f, 0.15f, 0.2f, 1f);
@@ -360,13 +440,13 @@ namespace AIPipeline.UI
             layout.childControlHeight = true;
             
             // Execute 按钮
-            CreateButton(toolbar.transform, "Execute", new Color(0.3f, 0.7f, 0.4f), OnExecuteClicked);
+            CreateButton(toolbar.transform, "执行", new Color(0.3f, 0.7f, 0.4f), OnExecuteClicked);
             
             // Clear 按钮
-            CreateButton(toolbar.transform, "Clear", new Color(0.7f, 0.3f, 0.3f), OnClearClicked);
+            CreateButton(toolbar.transform, "清空", new Color(0.7f, 0.3f, 0.3f), OnClearClicked);
             
-            // Connect 按钮
-            CreateButton(toolbar.transform, "Connect", new Color(0.5f, 0.5f, 0.7f), OnConnectClicked);
+            // Connect 按钮 - Removed in favor of drag-connect
+            // CreateButton(toolbar.transform, "Connect", new Color(0.5f, 0.5f, 0.7f), OnConnectClicked);
             
             // Status 文本
             GameObject statusObj = new GameObject("StatusText");
@@ -376,7 +456,7 @@ namespace AIPipeline.UI
             le.minWidth = 100;
             
             statusText = statusObj.AddComponent<TextMeshProUGUI>();
-            statusText.text = "Right-click to add nodes";
+            statusText.text = "右键添加节点";
             statusText.fontSize = 18;
             statusText.enableAutoSizing = true;
             statusText.fontSizeMin = 14;
@@ -445,14 +525,14 @@ namespace AIPipeline.UI
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
             
-            CreateMenuLabel(contextMenu.transform, "Add Node");
-            CreateMenuItem(contextMenu.transform, "Text Input", "TextInput");
-            CreateMenuItem(contextMenu.transform, "Image Input", "ImageInput");
-            CreateMenuItem(contextMenu.transform, "Text to Image", "Text2Image");
-            CreateMenuItem(contextMenu.transform, "Image to Image", "Image2Image");
-            CreateMenuItem(contextMenu.transform, "Image to 3D", "Image23D");
-            CreateMenuItem(contextMenu.transform, "Text to 3D", "Text23D");
-            CreateMenuItem(contextMenu.transform, "Preview", "Preview");
+            CreateMenuLabel(contextMenu.transform, "添加节点");
+            CreateMenuItem(contextMenu.transform, "文字输入", "TextInput");
+            CreateMenuItem(contextMenu.transform, "图片输入", "ImageInput");
+            CreateMenuItem(contextMenu.transform, "文生图", "Text2Image");
+            CreateMenuItem(contextMenu.transform, "图生图", "Image2Image");
+            CreateMenuItem(contextMenu.transform, "图生3D", "Image23D");
+            CreateMenuItem(contextMenu.transform, "文生3D", "Text23D");
+            CreateMenuItem(contextMenu.transform, "预览", "Preview");
             
             contextMenu.SetActive(false);
         }
@@ -586,28 +666,181 @@ namespace AIPipeline.UI
             }
             
             // 端口点击事件
-            inputPort.GetComponent<Button>().onClick.AddListener(() => OnPortClicked(nodeData, true));
-            outputPort.GetComponent<Button>().onClick.AddListener(() => OnPortClicked(nodeData, false));
+            // Default ports
+            if (nodeType != "Image2Image")
+            {
+                if (inputPort != null) 
+                    inputPort.GetComponent<Button>().onClick.AddListener(() => OnPortClicked(nodeData, true, "default"));
+            }
+
+            if (outputPort != null)
+                outputPort.GetComponent<Button>().onClick.AddListener(() => OnPortClicked(nodeData, false, "output"));
             
+            // Special setup for Image2Image (Multiple Inputs)
+            if (nodeType == "Image2Image")
+            {
+                // Destroy default input port
+                Destroy(inputPort);
+                nodeData.inputPort = null; // Clear default ref
+
+                // Create Image Input (Top)
+                GameObject imgPort = CreatePort(node.transform, true, "Image");
+                imgPort.GetComponent<RectTransform>().anchoredPosition = new Vector2(-8, 10);
+                imgPort.GetComponent<Button>().onClick.AddListener(() => OnPortClicked(nodeData, true, "Image"));
+
+                // Create Prompt Input (Bottom)
+                GameObject txtPort = CreatePort(node.transform, true, "Text");
+                txtPort.GetComponent<RectTransform>().anchoredPosition = new Vector2(-8, -40);
+                txtPort.GetComponent<Button>().onClick.AddListener(() => OnPortClicked(nodeData, true, "Text"));
+
+                // Store references if needed, or just rely on IDs in validation
+                // We'll trust the ID string passed to OnPortClicked
+            }
+            
+            // Delete Button (X)
+            GameObject closeBtnObj = new GameObject("CloseButton");
+            closeBtnObj.transform.SetParent(titleObj.transform, false);
+            RectTransform closeRect = closeBtnObj.AddComponent<RectTransform>();
+            closeRect.anchorMin = new Vector2(1, 0.5f);
+            closeRect.anchorMax = new Vector2(1, 0.5f);
+            closeRect.pivot = new Vector2(1, 0.5f);
+            closeRect.sizeDelta = new Vector2(30, 30);
+            closeRect.anchoredPosition = new Vector2(-5, 0);
+
+            Image closeImg = closeBtnObj.AddComponent<Image>();
+            closeImg.color = new Color(0.8f, 0.2f, 0.2f, 0.0f); // Transparent hit area initially or simple red
+            closeImg.color = new Color(1f, 1f, 1f, 0.1f); // Subtle background
+
+            Button closeBtn = closeBtnObj.AddComponent<Button>();
+            closeBtn.onClick.AddListener(() => DeleteNode(nodeData));
+            
+            // Text for Close Button
+            var closeTextObj = new GameObject("X");
+            closeTextObj.transform.SetParent(closeBtnObj.transform, false);
+            StretchToFill(closeTextObj.AddComponent<RectTransform>());
+            var closeText = closeTextObj.AddComponent<TextMeshProUGUI>();
+            closeText.text = "X";
+            closeText.alignment = TextAlignmentOptions.Center;
+            closeText.color = new Color(1f, 0.6f, 0.6f);
+            closeText.fontSize = 18;
+            closeText.fontStyle = FontStyles.Bold;
+
             return nodeData;
         }
-        
-        private GameObject CreatePort(Transform parent, bool isInput)
+
+        private void DeleteNode(NodeData node)
         {
-            GameObject port = new GameObject(isInput ? "InputPort" : "OutputPort");
+             if (node == null) return;
+
+             // Remove connections
+             // Since 'connections' is a list of lines, we need to find lines connected to this node
+             List<ConnectionLine> linesToRemove = new List<ConnectionLine>();
+             foreach (var conn in connections)
+             {
+                 if (conn.fromPort == node.outputPort || conn.toPort == node.inputPort)
+                 {
+                     linesToRemove.Add(conn);
+                 }
+             }
+
+             foreach (var line in linesToRemove)
+             {
+                 connections.Remove(line);
+                 if (line != null) Destroy(line.gameObject);
+             }
+
+             // Update logical connections
+             // 1. If this node is 'connectedTo' others, remove references from them?
+             // Actually, NodeData.connectedFrom ref is on the destination node.
+             // We need to clean that up.
+             
+             // Clean outgoing: For every node this node connects TO (Downstream)
+             if (node.connectedToNodes != null)
+             {
+                 foreach (var target in node.connectedToNodes)
+                 {
+                     if (target != null)
+                     {
+                         // Remove references to 'node' from target's inputConnections
+                         var keysToRemove = new List<string>();
+                         foreach(var kvp in target.inputConnections)
+                         {
+                             if (kvp.Value == node) keysToRemove.Add(kvp.Key);
+                         }
+                         foreach(var key in keysToRemove) target.inputConnections.Remove(key);
+                     }
+                 }
+                 node.connectedToNodes.Clear();
+             }
+
+             // Clean incoming: For the nodes that connect TO this node (Upstream)
+             // We need to find nodes that have 'node' in their connectedToNodes list.
+             // Since we don't store upstream nodes directly in a list on them easily for "outgoing to me",
+             // we rely on 'inputConnections' which tells us who connects to us.
+             
+             if (node.inputConnections.Count > 0)
+             {
+                 foreach (var kvp in node.inputConnections)
+                 {
+                     NodeData sourceNode = kvp.Value;
+                     if (sourceNode != null && sourceNode.connectedToNodes != null)
+                     {
+                         sourceNode.connectedToNodes.Remove(node);
+                     }
+                 }
+                 node.inputConnections.Clear();
+             }
+
+             // Remove from list
+             nodeList.Remove(node);
+
+             // Destroy Objects
+             if (node.previewModel != null) Destroy(node.previewModel);
+             if (node.previewCamera != null && node.previewCamera.gameObject != null) Destroy(node.previewCamera.gameObject);
+             if (node.gameObject != null) Destroy(node.gameObject);
+
+             UpdateStatus($"Deleted {node.nodeType}");
+        }
+        
+        private GameObject CreatePort(Transform parent, bool isInput, string portName = "")
+        {
+            GameObject port = new GameObject(isInput ? $"InputPort_{portName}" : "OutputPort");
             port.transform.SetParent(parent, false);
             
             RectTransform portRect = port.AddComponent<RectTransform>();
             portRect.sizeDelta = new Vector2(16, 16);
+            
+            // Layout adjusting for multiple inputs?
+            // For now, simple layout: if portName is "Image", top; "Prompt", bottom?
+            // Or just hardcoded positions in CreateNodeUI caller.
+            // Let's rely on caller setting position if needed, or default here.
+            
             portRect.anchorMin = new Vector2(isInput ? 0 : 1, 0.5f);
             portRect.anchorMax = portRect.anchorMin;
             portRect.anchoredPosition = new Vector2(isInput ? -8 : 8, -14);
             
             Image portImg = port.AddComponent<Image>();
-            portImg.color = isInput ? new Color(0.4f, 0.7f, 1f) : new Color(1f, 0.5f, 0.7f);
+            // Color based on type?
+            if (portName == "Text") portImg.color = new Color(0.25f, 0.45f, 0.65f);
+            else if (portName == "Image") portImg.color = new Color(0.45f, 0.55f, 0.65f);
+            else portImg.color = isInput ? new Color(0.4f, 0.7f, 1f) : new Color(1f, 0.5f, 0.7f);
             
-            port.AddComponent<Button>();
+            var btn = port.AddComponent<Button>();
             
+            // Add label if named
+            if (!string.IsNullOrEmpty(portName))
+            {
+                 GameObject lbl = new GameObject("Label");
+                 lbl.transform.SetParent(port.transform, false);
+                 var tmp = lbl.AddComponent<TextMeshProUGUI>();
+                 tmp.text = portName;
+                 tmp.fontSize = 10;
+                 tmp.color = Color.white;
+                 var rt = lbl.GetComponent<RectTransform>();
+                 rt.sizeDelta = new Vector2(50, 20);
+                 rt.anchoredPosition = new Vector2(isInput ? 30 : -30, 0); 
+            }
+
             return port;
         }
         
@@ -648,7 +881,7 @@ namespace AIPipeline.UI
             StretchToFill(placeholderObj.AddComponent<RectTransform>());
             
             var placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
-            placeholderText.text = "Preview\n(waiting for image)";
+            placeholderText.text = "预览\n(等待图片)";
             placeholderText.fontSize = 18; // 更大的字体
             placeholderText.color = new Color(0.5f, 0.5f, 0.5f);
             placeholderText.alignment = TextAlignmentOptions.Center;
@@ -688,7 +921,7 @@ namespace AIPipeline.UI
             var ph = new GameObject("Placeholder").AddComponent<TextMeshProUGUI>();
             ph.transform.SetParent(textArea.transform, false);
             StretchToFill(ph.GetComponent<RectTransform>());
-            ph.text = "Enter prompt...";
+            ph.text = "输入提示词...";
             ph.fontSize = 20;
             ph.fontStyle = FontStyles.Italic;
             ph.color = new Color(0.5f, 0.5f, 0.5f);
@@ -696,7 +929,7 @@ namespace AIPipeline.UI
             input.placeholder = ph;
         }
         
-        private void OnPortClicked(NodeData nodeData, bool isInputPort)
+        private void OnPortClicked(NodeData nodeData, bool isInputPort, string portID)
         {
             if (!isConnecting)
             {
@@ -705,7 +938,7 @@ namespace AIPipeline.UI
                 {
                     isConnecting = true;
                     connectingFromNode = nodeData;
-                    UpdateStatus($"Click input port to connect from {nodeData.nodeType} (output: {nodeData.OutputType})");
+                    UpdateStatus($"Connect from {nodeData.nodeType}...");
                 }
                 else
                 {
@@ -718,51 +951,47 @@ namespace AIPipeline.UI
                 if (isInputPort && connectingFromNode != nodeData)
                 {
                     // 验证连接类型
-                    if (connectingFromNode.CanConnectTo(nodeData, out string error))
+                    if (connectingFromNode.CanConnectTo(nodeData, portID, out string error))
                     {
-                        CreateConnection(connectingFromNode, nodeData);
-                        UpdateStatus($"Connected: {connectingFromNode.nodeType} -> {nodeData.nodeType}");
+                        CreateConnection(connectingFromNode, nodeData, portID);
+                        UpdateStatus($"Connected: {connectingFromNode.nodeType} -> {nodeData.nodeType} ({portID})");
                     }
                     else
                     {
-                        UpdateStatus($"[X] Connection failed: {error}");
+                        UpdateStatus($"[X] Failed: {error}");
                     }
-                }
-                else if (!isInputPort)
-                {
-                    // 点击了另一个输出端口，切换起始节点
-                    connectingFromNode = nodeData;
-                    UpdateStatus($"Switched to {nodeData.nodeType} (output: {nodeData.OutputType})");
-                    return;
                 }
                 isConnecting = false;
                 connectingFromNode = null;
             }
         }
-        
-        private void OnConnectClicked()
-        {
-            if (nodeList.Count < 2)
-            {
-                UpdateStatus("Add at least 2 nodes to connect!");
-                return;
-            }
-            UpdateStatus("Click output port (right), then input port (left)");
-        }
-        
-        private void CreateConnection(NodeData from, NodeData to)
+
+        private void CreateConnection(NodeData from, NodeData to, string toPortID)
         {
             GameObject lineObj = new GameObject("Connection");
             lineObj.transform.SetParent(connectionContainer.transform, false);
             
             var line = lineObj.AddComponent<ConnectionLine>();
             line.fromPort = from.outputPort;
-            line.toPort = to.inputPort;
+            
+            // Find target port rect based on ID?
+            // Hacky: We didn't store port Rect in Dictionary.
+            // But we know for Image2Image it's special.
+            // Let's implement a helper in NodeData to find port rect by ID.
+            line.toPort = to.GetInputPortRect(toPortID); 
             line.lineColor = new Color(1f, 0.5f, 0.7f, 0.8f);
             
-            from.connectedTo = to;
-            to.connectedFrom = from;  // 记录输入连接
+            from.connectedToNodes.Add(to); 
+            // Register input connection
+            to.inputConnections[toPortID] = from;
+            
             connections.Add(line);
+        }
+
+        private List<NodeData> GetOutgoingConnections(NodeData node)
+        {
+            if (node == null || node.connectedToNodes == null) return new List<NodeData>();
+            return node.connectedToNodes;
         }
         
         private void UpdateConnectionLines()
@@ -797,117 +1026,352 @@ namespace AIPipeline.UI
             rect.offsetMax = Vector2.zero;
         }
         
+        /// <summary>
+        /// 递归标记下游节点需要重新执行（当上游节点变化时）
+        /// </summary>
+        private void InvalidateDownstreamCache(NodeData node, HashSet<NodeData> needsReExecution)
+        {
+            if (node == null || node.connectedToNodes == null) return;
+            
+            foreach (var downstream in node.connectedToNodes)
+            {
+                if (downstream != null && !needsReExecution.Contains(downstream))
+                {
+                    needsReExecution.Add(downstream);
+                    downstream.cachedResult = null;  // Clear cached result
+                    InvalidateDownstreamCache(downstream, needsReExecution);  // Recurse
+                }
+            }
+        }
+        
         private void OnExecuteClicked()
         {
-            var textInputNode = nodeList.Find(n => n.nodeType == "TextInput");
-            if (textInputNode == null)
-            {
-                UpdateStatus("Add a TextInput node first!");
-                return;
-            }
-            
-            string prompt = textInputNode.inputField != null ? textInputNode.inputField.text : "";
-            if (string.IsNullOrWhiteSpace(prompt))
-            {
-                UpdateStatus("Enter a prompt in TextInput node!");
-                return;
-            }
-            
-            StartCoroutine(ExecutePipelineGraph(textInputNode, prompt));
+            StartCoroutine(ExecutePipelineGraph());
         }
         
         /// <summary>
         /// 根据节点连接智能执行管线
         /// </summary>
-        private System.Collections.IEnumerator ExecutePipelineGraph(NodeData startNode, string prompt)
+        /// <summary>
+        /// 根据节点连接执行管线 (Supporting branching)
+        /// </summary>
+        /// <summary>
+        /// 根据节点连接执行管线 (Supporting branching)
+        /// Starts from all TextInput/ImageInput nodes.
+        /// </summary>
+        private System.Collections.IEnumerator ExecutePipelineGraph()
         {
-            UpdateStatus($"Executing pipeline: {prompt}");
+            UpdateStatus("Executing pipeline (incremental)...");
             pipelineHasError = false; // Reset error flag
             
-            // 遍历节点连接，找到执行路径
-            NodeData currentNode = startNode;
-            object currentData = prompt; // 可以是 string (prompt) 或 byte[] (image/model)
+            // Map to store results of each node to pass to inputs of others
+            Dictionary<NodeData, object> nodeResults = new Dictionary<NodeData, object>();
             
-            while (currentNode != null)
+            // === INCREMENTAL EXECUTION: Pre-populate with cached results ===
+            // Also track which nodes need re-execution (no cache or upstream changed)
+            HashSet<NodeData> needsReExecution = new HashSet<NodeData>();
+            
+            // Step 1: Check TextInput nodes for changes and pre-populate cached results
+            foreach (var node in nodeList)
             {
-                // 检查是否有错误
+                if (node.nodeType == "TextInput")
+                {
+                    string currentText = node.inputField != null ? node.inputField.text : "";
+                    // Check if text changed since last execution
+                    if (node.cachedInputPrompt != currentText)
+                    {
+                        // Text changed - mark for re-execution and invalidate downstream
+                        needsReExecution.Add(node);
+                        InvalidateDownstreamCache(node, needsReExecution);
+                    }
+                }
+                
+                // Pre-populate nodeResults with cached data (for nodes not needing re-execution)
+                if (node.cachedResult != null && !needsReExecution.Contains(node))
+                {
+                    nodeResults[node] = node.cachedResult;
+                }
+            }
+            
+            // Step 2: Find nodes that have no cached result (new nodes)
+            foreach (var node in nodeList)
+            {
+                if (node.cachedResult == null && node.nodeType != "TextInput")
+                {
+                    needsReExecution.Add(node);
+                }
+            }
+            
+            // List for Traversal (with Priority)
+            List<NodeData> executionList = new List<NodeData>();
+            
+            // Find all Start Nodes (Roots)
+            bool hasRoots = false;
+            foreach (var node in nodeList)
+            {
+                if (node.nodeType == "TextInput")
+                {
+                    string p = node.inputField != null ? node.inputField.text : "";
+                    if (!string.IsNullOrEmpty(p))
+                    {
+                        nodeResults[node] = p;
+                        node.cachedResult = p;           // Cache the result
+                        node.cachedInputPrompt = p;      // Remember for change detection
+                        executionList.Add(node);
+                        hasRoots = true;
+                    }
+                }
+            }
+
+            if (!hasRoots)
+            {
+                UpdateStatus("No TextInput nodes found or empty prompts!");
+                yield break;
+            }
+
+            // Keep track of processed nodes to prevent infinite loops (though DAG should be enforced)
+            HashSet<NodeData> processedNodes = new HashSet<NodeData>();
+            // Roots are not "processed" in the loop sense (they are the data sources), 
+            // but we need to enqueue their children.
+            // Actually, we should enqueue the children of roots? 
+            // The loop processes a node, DOES action, then enqueues children.
+            // TextInput "action" is just providing data (already done in setup).
+            // So we should mark them as processed?
+            
+            // Better approach: Treat TextInput as needing processing? 
+            // The loop below processes dequeued nodes.
+            // If we enqueue TextInput, it will be dequeued.
+            // We need to handle TextInput in switch case to just pass data through or do nothing.
+
+            // Queue/List for traversal (List allows priority extraction)
+            // Rename to executionList to avoid confusion, but we are replacing the variable
+            // in the scope we define it.
+            // Wait, previous tool call defined it as 'executionQueue'. We should change the definition.
+            
+            // Note: I will replace the definition line below.
+
+            while (executionList.Count > 0)
+            {
                 if (pipelineHasError)
                 {
                     UpdateStatus("Pipeline stopped due to error!");
                     yield break;
                 }
+
+                // Priority Dequeue: Find 'Preview' nodes first
+                NodeData currentNode = null;
                 
-                // 找到下一个连接的节点
-                NodeData nextNode = currentNode.connectedTo;
-                
-                if (nextNode == null)
+                // Find index of high priority node
+                int bestIndex = -1;
+                for(int i=0; i<executionList.Count; i++)
                 {
-                    UpdateStatus("Pipeline complete (no more nodes)");
-                    break;
+                    if (executionList[i].nodeType == "Preview")
+                    {
+                        bestIndex = i;
+                        break; // Found one!
+                    }
                 }
                 
-                UpdateStatus($"Processing: {nextNode.nodeType}...");
+                if (bestIndex == -1) bestIndex = 0; // Default FIFO (take first)
                 
-                // 根据节点类型执行对应的 API
-                switch (nextNode.nodeType)
+                currentNode = executionList[bestIndex];
+                executionList.RemoveAt(bestIndex);
+                
+                // --- Input Resolution Logic ---
+                // For most nodes, we just need ANY input (or specific single input).
+                // For Image2Image, we need "Image" AND "Text" (optional or mandatory?).
+                
+                object inputData = null; // Logic below will determine this usually for single-input
+                
+                // SKIP Check: If this node has inputs, but they are not ready yet.
+                if (currentNode.nodeType == "Image2Image")
                 {
-                    case "Text2Image":
-                        yield return CallText2Image(prompt, (result) => currentData = result);
-                        if (pipelineHasError) yield break;
-                        break;
-                        
-                    case "Image2Image":
-                        if (currentData is byte[] imgData)
-                            yield return CallImage2Image(imgData, prompt, (result) => currentData = result);
-                        else
-                        {
-                            UpdateStatus("Image2Image needs image input!");
-                            pipelineHasError = true;
-                            yield break;
-                        }
-                        break;
-                        
-                    case "Image23D":
-                        if (currentData is byte[] imgData2)
-                        {
-                            yield return CallImage23D(imgData2, (result) => currentData = result);
-                        }
-                        else
-                        {
-                            UpdateStatus("Image23D needs image input!");
-                            pipelineHasError = true;
-                            yield break;
-                        }
-                        break;
-                        
-                    case "Text23D":
-                        yield return CallText23D(prompt, (result) => currentData = result);
-                        break;
-                        
-                    case "Preview":
-                        // 预览节点：根据数据类型显示
-                        if (currentData is byte[] imageOrModelData && imageOrModelData.Length > 100)
-                        {
-                            // 检测是图片还是模型
-                            if (IsGLB(imageOrModelData))
+                    // Check if inputs connected
+                    if (currentNode.inputConnections.ContainsKey("Image") && 
+                        !nodeResults.ContainsKey(currentNode.inputConnections["Image"]))
+                    {
+                        UpdateStatus($"Waiting for Image input for {currentNode.nodeType}...");
+                        continue;
+                    }
+                    if (currentNode.inputConnections.ContainsKey("Text") && 
+                        !nodeResults.ContainsKey(currentNode.inputConnections["Text"]))
+                    {
+                         UpdateStatus($"Waiting for Text input for {currentNode.nodeType}...");
+                         continue;
+                    }
+                }
+                else
+                {
+                    // Standard nodes: ensure at least one input is ready if connected
+                     if (currentNode.connectedFrom != null && !nodeResults.ContainsKey(currentNode.connectedFrom))
+                    {
+                        // Ensure we strictly wait for the specific single parent? 
+                        // Yes, connectedFrom is the primary parent.
+                        UpdateStatus($"Skipping {currentNode.nodeType}: Waiting for input data...");
+                        continue; 
+                    }
+                }
+
+                if (processedNodes.Contains(currentNode)) continue;
+
+                UpdateStatus($"Processing: {currentNode.nodeType}...");
+
+                object outputData = null;
+                
+                // === INCREMENTAL: Check if we can use cached result ===
+                bool useCache = !needsReExecution.Contains(currentNode) && currentNode.cachedResult != null;
+                
+                if (useCache)
+                {
+                    outputData = currentNode.cachedResult;
+                    UpdateStatus($"Using cached result for {currentNode.nodeType}");
+                }
+                else
+                {
+                    // Execute based on node type
+                    switch (currentNode.nodeType)
+                    {
+                        case "TextInput":
+                             // Already put in nodeResults. Just pass.
+                             outputData = nodeResults[currentNode];
+                             break;
+
+                        case "Text2Image":
+                            // Get input from connected
+                            if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+                            
+                            if (inputData is string txtPrompt && !string.IsNullOrEmpty(txtPrompt))
                             {
-                                // 在 Preview 节点内显示 3D 模型
-                                yield return LoadModelInNode(imageOrModelData, nextNode);
+                                UpdateStatus($"Calling Text2Image API...");
+                                yield return CallText2Image(txtPrompt, (result) => outputData = result);
+                            }
+                            else 
+                                { UpdateStatus("Text2Image needs text input!"); pipelineHasError = true; }
+                            break;
+                            
+                        case "Image2Image":
+                            // Multi-input gathering
+                            byte[] imgInput = null;
+                            string txtInput = ""; 
+                            
+                            if (currentNode.inputConnections.ContainsKey("Image"))
+                            {
+                                var src = currentNode.inputConnections["Image"];
+                                if (nodeResults.ContainsKey(src)) imgInput = nodeResults[src] as byte[];
+                            }
+                            
+                            if (currentNode.inputConnections.ContainsKey("Text"))
+                            {
+                                 var src = currentNode.inputConnections["Text"];
+                                 if (nodeResults.ContainsKey(src)) txtInput = nodeResults[src] as string;
+                            }
+
+                            if (imgInput != null)
+                            {
+                                UpdateStatus($"Calling Image2Image API...");
+                                yield return CallImage2Image(imgInput, txtInput, (result) => outputData = result);
                             }
                             else
                             {
-                                // 显示图片到节点内
-                                DisplayImageInNode(imageOrModelData, nextNode);
+                                UpdateStatus("Image2Image needs image input!");
+                                pipelineHasError = true;
                             }
-                        }
-                        else
-                        {
-                            UpdateStatus("Preview node: No valid data to display");
-                        }
-                        break;
+                            break;
+                            
+                        case "Image23D":
+                             if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+
+                            if (inputData is byte[] imgData2)
+                            {
+                                UpdateStatus($"Calling Image23D API...");
+                                yield return CallImage23D(imgData2, (result) => outputData = result);
+                            }
+                            else
+                            {
+                                UpdateStatus("Image23D needs image input!");
+                                pipelineHasError = true;
+                            }
+                            break;
+                            
+                        case "Text23D":
+                             if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+                                
+                            if (inputData is string txtPrompt2)
+                            {
+                                UpdateStatus($"Calling Text23D API...");
+                                yield return CallText23D(txtPrompt2, (result) => outputData = result);
+                            }
+                            else
+                                 { UpdateStatus("Text23D needs text input!"); pipelineHasError = true; }
+                            break;
+                            
+                        case "Preview":
+                            // No output for preview, just display
+                            if (currentNode.connectedFrom != null && nodeResults.ContainsKey(currentNode.connectedFrom))
+                                inputData = nodeResults[currentNode.connectedFrom];
+
+                            if (inputData is byte[] imageOrModelData && imageOrModelData.Length > 100)
+                            {
+                                if (IsGLB(imageOrModelData))
+                                {
+                                    yield return LoadModelInNode(imageOrModelData, currentNode);
+                                }
+                                else
+                                {
+                                    DisplayImageInNode(imageOrModelData, currentNode);
+                                }
+                            }
+                            else
+                            {
+                                UpdateStatus("Preview node: No valid data to display");
+                            }
+                            // Preview passes data through
+                            outputData = inputData; 
+                            break;
+                    }
+                    
+                    // === Cache the result for future incremental runs ===
+                    if (outputData != null)
+                    {
+                        currentNode.cachedResult = outputData;
+                    }
+                }
+
+                if (pipelineHasError) yield break;
+
+                // Cache result
+                if (outputData != null)
+                {
+                    nodeResults[currentNode] = outputData;
+                    processedNodes.Add(currentNode);
+
+                    // Add downstream nodes to queue
+                    var children = GetOutgoingConnections(currentNode);
+                    UpdateStatus($"Node {currentNode.nodeType} has {children.Count} children.");
+                    
+                    foreach (var nextNode in children)
+                    {
+                        // Add if not already in list to avoid duplicates? 
+                        // Actually standard BFS/Graph execution might visit nodes multiple times if multiple inputs?
+                        // But we check 'processedNodes'.
+                        // Though for Image2Image we might want to revisit?
+                        // No, processedNodes check handles it.
+                        
+                        // Just Add.
+                        UpdateStatus($"Enqueuing child: {nextNode.nodeType}");
+                        executionList.Add(nextNode);
+                    }
                 }
                 
-                currentNode = nextNode;
+                // FORCE UI UPDATE if we just processed a Preview node
+                if (currentNode.nodeType == "Preview")
+                {
+                    yield return null; 
+                    // Optional: yield return new WaitForEndOfFrame();
+                }
             }
             
             if (!pipelineHasError)
@@ -915,6 +1379,32 @@ namespace AIPipeline.UI
                 UpdateStatus("Pipeline finished!");
             }
         }
+
+        // Helper to find all nodes that have 'connectedFrom' == node
+        // Warning: The current data structure 'connectedFrom' is single-link on the receiving end.
+        // We need to find which nodes point TO 'node' as their 'connectedFrom'.
+        // Wait, the existing structure is: NodeData.connectedTo (single). 
+        // Logic check: "from.connectedTo = to;" 
+        // This implies each node can only output to ONE node.
+        // **This is the root cause.**
+        // The user screenshot shows output connected to multiple nodes? 
+        // If the UI allows dragging lines to multiple nodes, the data structure must support it.
+        // Let's check CreateConnection/NodeData.
+        
+        // RE-READING NodeData:
+        // public NodeData connectedTo;      // Output connection (Single?)
+        // public NodeData connectedFrom;    // Input connection (Single?)
+        
+        // If the user visually connected one output to two inputs (Text2Image -> Preview AND Text2Image -> Image23D),
+        // but 'connectedTo' only stores ONE reference, then one connection overwrote the other in data, 
+        // even if lines might be drawn (if existing connections list stores them).
+        
+        // Let's look at CreateConnection:
+        // from.connectedTo = to;
+        // connections.Add(line);
+        
+        // Yes, 'connectedTo' is overwritten. So logic only follows the LAST made connection.
+        // I need to change 'connectedTo' to a List<NodeData>.
         
         private bool IsGLB(byte[] data)
         {
@@ -941,11 +1431,11 @@ namespace AIPipeline.UI
                 {
                     previewNode.previewImage.texture = texture;
                     
-                    // 隐藏占位符文字
-                    var placeholder = previewNode.gameObject.GetComponentInChildren<TextMeshProUGUI>();
-                    if (placeholder != null && placeholder.gameObject.name == "Placeholder")
+                    // 隐藏占位符文字 - 使用准确的路径查找
+                    var placeholderTransform = previewNode.gameObject.transform.Find("PreviewArea/Placeholder");
+                    if (placeholderTransform != null)
                     {
-                        placeholder.gameObject.SetActive(false);
+                        placeholderTransform.gameObject.SetActive(false);
                     }
                     
                     UpdateStatus($"Image displayed in node: {texture.width}x{texture.height}");
@@ -1100,6 +1590,7 @@ namespace AIPipeline.UI
             
             using (var request = UnityEngine.Networking.UnityWebRequest.Post(Image2ImageUrl, form))
             {
+                request.timeout = 300; // 5 minutes to be safe
                 yield return request.SendWebRequest();
                 
                 if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
@@ -1117,6 +1608,7 @@ namespace AIPipeline.UI
             
             using (var request = UnityEngine.Networking.UnityWebRequest.Post(Image23DUrl, form))
             {
+                request.timeout = 300;
                 yield return request.SendWebRequest();
                 
                 if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
@@ -1282,15 +1774,11 @@ namespace AIPipeline.UI
             {
                 previewNode.previewImage.texture = previewNode.previewRT;
                 
-                // 隐藏占位符 - 查找所有 TextMeshProUGUI 并隐藏名为 Placeholder 的
-                var allTexts = previewNode.gameObject.GetComponentsInChildren<TextMeshProUGUI>();
-                foreach (var txt in allTexts)
+                // 隐藏占位符 - 使用准确的路径查找
+                var placeholderTransform = previewNode.gameObject.transform.Find("PreviewArea/Placeholder");
+                if (placeholderTransform != null)
                 {
-                    if (txt.gameObject.name == "Placeholder")
-                    {
-                        txt.gameObject.SetActive(false);
-                        break;
-                    }
+                    placeholderTransform.gameObject.SetActive(false);
                 }
             }
             
@@ -1349,7 +1837,7 @@ namespace AIPipeline.UI
             GameObject placeTextObj = new GameObject("Text");
             placeTextObj.transform.SetParent(placeObj.transform, false);
             var placeText = placeTextObj.AddComponent<TextMeshProUGUI>();
-            placeText.text = "Place";
+            placeText.text = "放置";
             placeText.fontSize = 11;
             placeText.alignment = TextAlignmentOptions.Center;
             placeText.color = Color.white;
@@ -1374,7 +1862,7 @@ namespace AIPipeline.UI
             GameObject bagTextObj = new GameObject("Text");
             bagTextObj.transform.SetParent(bagObj.transform, false);
             var bagText = bagTextObj.AddComponent<TextMeshProUGUI>();
-            bagText.text = "Add to Bag";
+            bagText.text = "加入背包";
             bagText.fontSize = 11;
             bagText.alignment = TextAlignmentOptions.Center;
             bagText.color = Color.white;
@@ -1529,6 +2017,10 @@ namespace AIPipeline.UI
         {
             foreach (var node in nodeList)
             {
+                // Clear cached results
+                node.cachedResult = null;
+                node.cachedInputPrompt = null;
+                
                 if (node.previewModel != null) Destroy(node.previewModel);
                 if (node.previewCamera != null) Destroy(node.previewCamera.gameObject);
                 if (node.gameObject != null) Destroy(node.gameObject);
@@ -1539,7 +2031,7 @@ namespace AIPipeline.UI
                 if (conn != null) Destroy(conn.gameObject);
             connections.Clear();
             
-            UpdateStatus("Canvas cleared");
+            UpdateStatus("Canvas cleared (all cache invalidated)");
         }
         
         private void UpdateStatus(string msg)
@@ -1575,8 +2067,19 @@ namespace AIPipeline.UI
         public RenderTexture previewRT;   // 预览渲染纹理
         public byte[] cachedModelData;    // 缓存的模型数据用于放置到场景
         public Button placeButton;        // "Place in Scene" 按钮
-        public NodeData connectedTo;      // 输出连接到哪个节点
-        public NodeData connectedFrom;    // 输入来自哪个节点
+        public List<NodeData> connectedToNodes = new List<NodeData>(); // Output connections
+        
+        // === Incremental Execution: Cached Results ===
+        public object cachedResult;       // 缓存的执行结果 (string, byte[], etc.)
+        public string cachedInputPrompt;  // TextInput 节点：缓存的输入文本（用于检测变化）
+        
+        // Multi-input support: PortID -> Connected Source Node
+        public Dictionary<string, NodeData> inputConnections = new Dictionary<string, NodeData>();
+        
+        // Helper for backwards compatibility or single-input nodes
+        public NodeData connectedFrom => inputConnections.Count > 0 ? (new List<NodeData>(inputConnections.Values))[0] : null;
+
+        public bool HasInputConnection(string portID) => inputConnections.ContainsKey(portID) && inputConnections[portID] != null;
         
         public bool HasIncomingConnection => connectedFrom != null;
         
@@ -1625,54 +2128,50 @@ namespace AIPipeline.UI
         /// <summary>
         /// 检查是否可以连接到目标节点
         /// </summary>
-        public bool CanConnectTo(NodeData target, out string error)
+        /// <summary>
+        /// 检查是否可以连接到目标节点
+        /// </summary>
+        public bool CanConnectTo(NodeData target, string targetPortID, out string error)
         {
             error = "";
+            if (target == null) { error = "Target is null"; return false; }
+            if (target == this) { error = "Self-loop"; return false; }
             
-            if (target == null)
+            if (target.HasInputConnection(targetPortID))
             {
-                error = "Target node is null";
+                error = "Port occupied";
                 return false;
             }
-            
-            if (target == this)
+
+            // Determine Target Port Type
+            DataType targetInputType = DataType.None;
+            if (target.nodeType == "Image2Image")
             {
-                error = "Cannot connect to self";
-                return false;
+                if (targetPortID == "Image") targetInputType = DataType.Image;
+                else if (targetPortID == "Text") targetInputType = DataType.Text;
             }
-            
-            // 检查目标节点是否已有输入连接
-            if (target.HasIncomingConnection)
+            else
             {
-                error = $"{target.nodeType} already has an input connection";
-                return false;
+                targetInputType = target.InputType; // Fallback
             }
-            
-            // 检查输出类型是否匹配输入类型
-            DataType myOutput = this.OutputType;
-            DataType targetInput = target.InputType;
-            
-            if (myOutput == DataType.None)
+
+            if ((this.OutputType & targetInputType) == 0)
             {
-                error = $"{nodeType} has no output";
-                return false;
-            }
-            
-            if (targetInput == DataType.None)
-            {
-                // 目标不需要输入（如 TextInput）
-                error = $"{target.nodeType} does not accept input";
-                return false;
-            }
-            
-            // 检查类型匹配
-            if ((targetInput & myOutput) == 0)
-            {
-                error = $"Type mismatch: {nodeType}({myOutput}) -> {target.nodeType}({targetInput})";
+                error = $"Mismatch: {this.OutputType} -> {targetInputType}";
                 return false;
             }
             
             return true;
+        }
+
+        public RectTransform GetInputPortRect(string portID)
+        {
+            // Simple lookup based on siblings?
+            // Or better: store map when creating ports.
+            // Re-finding children by name:
+            if (portID == "default") return inputPort;
+            var portObj = gameObject.transform.Find($"InputPort_{portID}");
+            return portObj != null ? portObj.GetComponent<RectTransform>() : inputPort;
         }
     }
     

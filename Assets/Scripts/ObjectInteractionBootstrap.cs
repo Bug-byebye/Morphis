@@ -6,7 +6,7 @@ using UnityEngine.SceneManagement;
 /// </summary>
 public static class ObjectInteractionBootstrap
 {
-    private const string TargetSceneName = "Playground";
+    private const string TargetSceneName = "MainScene";
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Init()

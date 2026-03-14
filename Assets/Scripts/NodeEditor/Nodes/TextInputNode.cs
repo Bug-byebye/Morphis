@@ -17,7 +17,7 @@ namespace AIPipeline.Nodes
         
         private void Awake()
         {
-            nodeName = "Text Input";
+            nodeName = "文字输入";
             nodeColor = new Color(0.6f, 0.8f, 1f); // 浅蓝色
         }
         

@@ -1,1 +1,2 @@
 *.tga filter=lfs diff=lfs merge=lfs -text
+Assets/TextMesh[[:space:]]Pro/Resources/Fonts[[:space:]]&[[:space:]]Materials/NotoSansSC-VariableFont_wght[[:space:]]SDF.asset filter=lfs diff=lfs merge=lfs -text

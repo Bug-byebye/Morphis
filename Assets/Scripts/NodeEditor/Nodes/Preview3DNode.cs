@@ -43,7 +43,7 @@ namespace AIPipeline.Nodes
         
         private void Awake()
         {
-            nodeName = "3D Preview";
+            nodeName = "3D 预览";
             nodeColor = new Color(0.6f, 1f, 0.6f); // 浅绿色
         }
         
@@ -244,13 +244,13 @@ namespace AIPipeline.Nodes
             hlg.childForceExpandWidth = true;
             
             // "放置到场景" 按钮
-            CreateButton(buttonArea.transform, "Place in Scene", new Color(0.3f, 0.7f, 0.3f), OnPlaceInScene);
+            CreateButton(buttonArea.transform, "放置到场景", new Color(0.3f, 0.7f, 0.3f), OnPlaceInScene);
 
             // "加入背包 / 模型库" 按钮
-            CreateButton(buttonArea.transform, "Add to Bag", new Color(0.35f, 0.55f, 0.9f), OnAddToBag);
+            CreateButton(buttonArea.transform, "加入背包", new Color(0.35f, 0.55f, 0.9f), OnAddToBag);
             
             // "关闭" 按钮
-            CreateButton(buttonArea.transform, "Close", new Color(0.5f, 0.5f, 0.5f), OnClosePreview);
+            CreateButton(buttonArea.transform, "关闭", new Color(0.5f, 0.5f, 0.5f), OnClosePreview);
             
             isPreviewOpen = true;
         }

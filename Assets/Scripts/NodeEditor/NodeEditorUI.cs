@@ -31,9 +31,6 @@ namespace AIPipeline
         private CursorLockMode savedLockMode;
         private bool savedCursorVisible;
         
-        // 玩家输入组件
-        private PlayerInput playerInput;
-        
         void Start()
         {
             if (editorPanel != null)
@@ -45,16 +42,15 @@ namespace AIPipeline
             if (createPipelineButton != null)
                 createPipelineButton.onClick.AddListener(OnCreatePipelineClicked);
             
-            // 查找 PlayerInput 组件
-            playerInput = FindObjectOfType<PlayerInput>();
-                
             SetupDropdown();
             UpdateStatus("Press Tab to open Node Editor");
         }
         
         void Update()
         {
-            // Tab 键切换编辑器
+            // Tab is handled by SimpleNodeEditor — only handle here if it's not present
+            if (AIPipeline.UI.SimpleNodeEditor.Instance != null) return;
+
             if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
             {
                 ToggleEditor();
@@ -74,18 +70,18 @@ namespace AIPipeline
                 Cursor.visible = true;
                 
                 // 禁用玩家输入
-                if (playerInput != null)
-                    playerInput.enabled = false;
+                var pi = FindObjectOfType<PlayerInput>();
+                if (pi != null) pi.enabled = false;
             }
             else
             {
-                // 恢复光标状态
-                Cursor.lockState = savedLockMode;
-                Cursor.visible = savedCursorVisible;
+                // Keep cursor unlocked and visible
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
                 
                 // 恢复玩家输入
-                if (playerInput != null)
-                    playerInput.enabled = true;
+                var pi = FindObjectOfType<PlayerInput>();
+                if (pi != null) pi.enabled = true;
             }
             
             if (editorPanel != null)
