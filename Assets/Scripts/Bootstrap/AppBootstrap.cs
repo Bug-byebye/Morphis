@@ -81,6 +81,7 @@ namespace Morphis
             {
                 // 服务器模式：仅启动 Server，不启动 Client，不允许 Host
                 ConfigureNetworkManager(manager);
+                EnsureWorldServerReporter();
                 Debug.Log("[AppBootstrap] Starting Mirror in SERVER mode (StartServer).");
                 manager.StartServer();
                 _networkStarted = true;
@@ -142,6 +143,40 @@ namespace Morphis
                     
                     Debug.LogWarning($"[AppBootstrap] No dynamic server address, using fallback: {manager.networkAddress}:{config.ServerPort}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// 在 Dedicated Server 模式下，确保存在一个 WorldServerReporter，用于定期向后端上报玩家数量，
+        /// 以防止 World 进程管理器将仍有玩家的世界误判为“空闲”而自动清理。
+        /// </summary>
+        private static void EnsureWorldServerReporter()
+        {
+            if (!AppRuntime.IsServer) return;
+
+            // 避免直接依赖 WorldSnapshot 程序集：通过类型名查找是否已存在 WorldServerReporter
+            var behaviours = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+            foreach (var mb in behaviours)
+            {
+                if (mb == null) continue;
+                if (mb.GetType().Name == "WorldServerReporter")
+                {
+                    return;
+                }
+            }
+
+            var go = new GameObject("WorldServerReporter(Auto)");
+            Object.DontDestroyOnLoad(go);
+            // 通过反射方式添加组件，避免编译期依赖命名空间
+            var reporterType = System.Type.GetType("Morphis.WorldSnapshot.WorldServerReporter");
+            if (reporterType != null && reporterType.IsSubclassOf(typeof(MonoBehaviour)))
+            {
+                go.AddComponent(reporterType);
+                Debug.Log("[AppBootstrap] Auto-created WorldServerReporter for dedicated server.");
+            }
+            else
+            {
+                Debug.LogWarning("[AppBootstrap] Failed to locate Morphis.WorldSnapshot.WorldServerReporter type. Player count reporting will be disabled.");
             }
         }
 

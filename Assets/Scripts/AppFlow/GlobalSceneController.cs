@@ -192,19 +192,40 @@ namespace Morphis.AppFlow
 
         private void OnSaveClicked()
         {
-            // 通过类型名查找 WorldSnapshotManager，避免直接依赖命名空间/程序集引用
+            // 通过类型名查找 WorldSnapshotManager，避免直接依赖跨程序集引用
             var behaviours = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
             foreach (var mb in behaviours)
             {
                 if (mb == null) continue;
                 var type = mb.GetType();
-                if (type.Name == "WorldSnapshotManager")
+                if (type.Name != "WorldSnapshotManager") continue;
+
+                // 反射调用 SaveWorldServer(string worldId = null, Action onSuccess = null, Action<string> onError = null)
+                var method = type.GetMethod(
+                    "SaveWorldServer",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+                );
+                if (method != null)
                 {
-                    // 调用其无参 SaveWorldServer()（worldId 使用当前会话）
-                    mb.Invoke("SaveWorldServer", 0f);
-                    Debug.Log("[GlobalSceneController] Requested world save via exit dialog.");
-                    break;
+                    try
+                    {
+                        var parameters = method.GetParameters();
+                        object[] args = parameters.Length switch
+                        {
+                            0 => System.Array.Empty<object>(),
+                            1 => new object[] { null },
+                            2 => new object[] { null, null },
+                            _ => new object[] { null, null, null }
+                        };
+                        method.Invoke(mb, args);
+                        Debug.Log("[GlobalSceneController] Requested world save via exit dialog.");
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogWarning($"[GlobalSceneController] Failed to invoke SaveWorldServer via reflection: {e.GetType().Name}: {e.Message}");
+                    }
                 }
+                break;
             }
         }
 

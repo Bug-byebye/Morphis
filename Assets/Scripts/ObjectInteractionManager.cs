@@ -436,7 +436,29 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             currentTarget.SetComment(commentInput.text);
             Debug.Log($"[Interaction] Comment saved: {commentInput.text}");
-            RequestServerAutosave();
+
+            // 联机模式下：先通知服务器更新权威 comment，再根据需要触发保存
+            if (Mirror.NetworkClient.active && StarterAssets.NetworkPlayerSetup.Local != null)
+            {
+                var worldObj = currentTarget.GetComponent<Morphis.WorldSnapshot.WorldObject>();
+                if (worldObj != null)
+                {
+                    bool ok = StarterAssets.NetworkPlayerSetup.Local.RequestSetComment(worldObj.ObjectId, commentInput.text);
+                    if (!ok)
+                    {
+                        Debug.LogWarning("[Interaction] RequestSetComment failed, falling back to direct autosave.");
+                        RequestServerAutosave();
+                    }
+                }
+                else
+                {
+                    RequestServerAutosave();
+                }
+            }
+            else
+            {
+                RequestServerAutosave();
+            }
         }
         CloseDialog();
     }
@@ -447,7 +469,28 @@ public class ObjectInteractionManager : MonoBehaviour
         {
             currentTarget.ClearComment();
             Debug.Log("[Interaction] Comment deleted");
-            RequestServerAutosave();
+
+            if (Mirror.NetworkClient.active && StarterAssets.NetworkPlayerSetup.Local != null)
+            {
+                var worldObj = currentTarget.GetComponent<Morphis.WorldSnapshot.WorldObject>();
+                if (worldObj != null)
+                {
+                    bool ok = StarterAssets.NetworkPlayerSetup.Local.RequestSetComment(worldObj.ObjectId, "");
+                    if (!ok)
+                    {
+                        Debug.LogWarning("[Interaction] RequestSetComment (delete) failed, falling back to direct autosave.");
+                        RequestServerAutosave();
+                    }
+                }
+                else
+                {
+                    RequestServerAutosave();
+                }
+            }
+            else
+            {
+                RequestServerAutosave();
+            }
         }
         CloseDialog();
     }
