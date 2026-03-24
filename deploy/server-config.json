@@ -1,5 +1,5 @@
 {
-  "ApiBaseUrl": "http://121.43.141.248:8000",
+  "ApiBaseUrl": "http://34.143.226.137:8000",
   "ServerListenAddress": "0.0.0.0",
   "ServerPort": 7777,
   "DefaultWorldId": "default-world",
@@ -11,7 +11,8 @@
     "Password": "Morphis1234"
   },
   "UnityServer": {
-    "ExecutablePath": "/root/MorphisServer/Morphis.x86_64",
+    "ExecutablePath": "/home/huangfengr/MorphisServer/Morphis.x86_64",
+    "LogDirectory": "/home/huangfengr/Morphis/logs/worlds",
     "BasePort": 7777,
     "MaxWorlds": 50,
     "IdleTimeoutMinutes": 5

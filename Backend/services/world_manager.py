@@ -6,6 +6,7 @@ import subprocess
 import signal
 import time
 import psutil
+from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -51,13 +52,24 @@ class WorldProcessManager:
         self.server_executable = str(
             unity_cfg.get("ExecutablePath", "/home/morphis/MorphisServer/Morphis.x86_64")
         )
+        project_root = Path(__file__).resolve().parents[2]
+        configured_log_dir = str(unity_cfg.get("LogDirectory", "")).strip()
+        if configured_log_dir:
+            log_dir = Path(configured_log_dir)
+            if not log_dir.is_absolute():
+                log_dir = project_root / log_dir
+        else:
+            log_dir = project_root / "logs" / "worlds"
+        self.log_dir = log_dir
         self.backend_url = get_api_base_url()
         
         # 启动后台清理线程
         self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleanup_thread.start()
         
-        logger.info(f"[WorldManager] Initialized. Server: {self.server_executable}")
+        logger.info(
+            f"[WorldManager] Initialized. Server: {self.server_executable}, Logs: {self.log_dir}"
+        )
     
     def _get_available_port(self, db: Session) -> Optional[int]:
         """分配可用端口"""
@@ -127,9 +139,8 @@ class WorldProcessManager:
             env["API_BASE_URL"] = self.backend_url
             
             # 日志文件
-            log_dir = "/var/log/morphis-worlds"
-            os.makedirs(log_dir, exist_ok=True)
-            log_file = os.path.join(log_dir, f"{world_id}.log")
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = self.log_dir / f"{world_id}.log"
             
             with open(log_file, "a") as log:
                 process = subprocess.Popen(
