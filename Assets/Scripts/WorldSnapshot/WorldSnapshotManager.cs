@@ -29,6 +29,16 @@ namespace Morphis.WorldSnapshot
         /// <summary> 当前会话使用的世界 ID：来自 AppSession.WorkspaceId（选中的空间）或 defaultWorldId </summary>
         private string _currentWorldId;
 
+        private HttpWorldService EnsureHttpService()
+        {
+            if (_httpService == null)
+            {
+                _httpService = HttpWorldService.GetOrCreate();
+            }
+
+            return _httpService;
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -43,7 +53,7 @@ namespace Morphis.WorldSnapshot
             if (prefabRegistry != null)
                 PrefabRegistryManager.SetRegistry(prefabRegistry);
 
-            _httpService = HttpWorldService.GetOrCreate();
+            EnsureHttpService();
             SceneManager.sceneLoaded += OnSceneLoaded;
 
             // 若本对象是在 MainScene 的 sceneLoaded 回调里创建的，本次不会收到 sceneLoaded，
@@ -56,6 +66,10 @@ namespace Morphis.WorldSnapshot
         private void OnDestroy()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
 
         private string GetCurrentWorldId()
@@ -196,7 +210,7 @@ namespace Morphis.WorldSnapshot
 
             // 单机/离线保持原逻辑
             var snapshot = WorldSnapshotBuilder.BuildSnapshot(worldId);
-            _httpService.SaveToServer(snapshot, onSuccess, onError);
+            EnsureHttpService().SaveToServer(snapshot, onSuccess, onError);
         }
 
         /// <summary>
@@ -256,7 +270,7 @@ namespace Morphis.WorldSnapshot
                 return;
             }
             worldId = worldId ?? GetCurrentWorldId();
-            _httpService.LoadFromServer(worldId,
+            EnsureHttpService().LoadFromServer(worldId,
                 snapshot =>
                 {
                     ApplySnapshot(snapshot);

@@ -11,12 +11,12 @@ namespace Morphis.Chat
     /// <summary>
     /// Independent human chat widget.
     /// UI is created at runtime: right-side toggle button + bottom-right phone panel.
-    /// Current reply mode is local echo for API integration later.
+    /// Talks to the backend human companion API.
     /// </summary>
     public class HumanChatUI : MonoBehaviour
     {
         [Header("Settings")]
-        [SerializeField] private string assistantName = "人工客服";
+        [SerializeField] private string assistantName = "伴侣";
         [SerializeField] private Color userBubbleColor = new Color(0.18f, 0.56f, 0.96f, 1f);
         [SerializeField] private Color assistantBubbleColor = new Color(0.2f, 0.75f, 0.45f, 1f);
         [SerializeField] private Color userAvatarColor = new Color(0.14f, 0.46f, 0.82f, 1f);
@@ -124,14 +124,21 @@ namespace Morphis.Chat
             inputField.ActivateInputField();
 
             GameObject typingMessage = AddMessage(assistantName, "...", false);
-            StartCoroutine(ReplyWithEcho(userMessage, typingMessage));
-        }
-
-        private IEnumerator ReplyWithEcho(string userMessage, GameObject typingMessage)
-        {
-            yield return new WaitForSeconds(0.2f);
-            if (typingMessage != null) Destroy(typingMessage);
-            AddMessage(assistantName, userMessage, false);
+            HumanChatAPI.SendMessage(
+                userMessage,
+                response =>
+                {
+                    if (typingMessage != null) Destroy(typingMessage);
+                    AddMessage(assistantName, response, false);
+                },
+                error =>
+                {
+                    if (typingMessage != null) Destroy(typingMessage);
+                    AddMessage(assistantName, "我刚刚有点走神了。你再和我说一次，好吗？", false);
+                    Debug.LogError($"[HumanChatUI] API Error: {error}");
+                },
+                assistantName
+            );
         }
 
         private GameObject AddMessage(string sender, string message, bool isUserMessage)
@@ -194,7 +201,7 @@ namespace Morphis.Chat
 
             CreateRightToggleButton(canvasObj);
             CreatePhonePanel(canvasObj);
-            AddMessage(assistantName, "你好，这里是人聊窗口（回显模式）。", false);
+            AddMessage(assistantName, "我在这里陪你。今天想和我聊点什么？", false);
         }
 
         private void EnsureEventSystem()
@@ -228,7 +235,7 @@ namespace Morphis.Chat
             toggleButton = buttonObj.AddComponent<Button>();
             toggleButton.onClick.AddListener(Toggle);
 
-            toggleButtonText = CreateTextChild(buttonObj, "Text", "打开人聊");
+            toggleButtonText = CreateTextChild(buttonObj, "Text", "打开伴侣");
             toggleButtonText.alignment = TextAlignmentOptions.Center;
             toggleButtonText.fontSize = 22;
         }
@@ -269,7 +276,7 @@ namespace Morphis.Chat
                 new Vector2(0f, -30f), new Vector2(0f, 52f));
             header.AddComponent<Image>().color = new Color(0.16f, 0.18f, 0.2f, 0.98f);
 
-            TextMeshProUGUI title = CreateTextChild(header, "Title", "人类聊天");
+            TextMeshProUGUI title = CreateTextChild(header, "Title", $"与{assistantName}聊天");
             title.alignment = TextAlignmentOptions.Center;
             title.fontSize = 22;
 
@@ -331,7 +338,7 @@ namespace Morphis.Chat
             inputTextRect.anchorMax = Vector2.one;
             inputTextRect.sizeDelta = new Vector2(-10f, 0f);
 
-            TextMeshProUGUI placeholder = CreateTextChild(inputObj, "Placeholder", "输入消息...");
+            TextMeshProUGUI placeholder = CreateTextChild(inputObj, "Placeholder", "和TA说点什么...");
             placeholder.color = new Color(0.5f, 0.5f, 0.5f);
             placeholder.fontStyle = FontStyles.Italic;
             inputField.placeholder = placeholder;
@@ -412,7 +419,7 @@ namespace Morphis.Chat
         private void UpdateToggleButtonLabel()
         {
             if (toggleButtonText == null) return;
-            toggleButtonText.text = isOpen ? "收起人聊" : "打开人聊";
+            toggleButtonText.text = isOpen ? "收起伴侣" : "打开伴侣";
         }
 
         private void CreateAvatar(Transform parent, string label, bool isUserMessage)

@@ -23,6 +23,12 @@ import secrets
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
 from services.dog_chat import ChatRequest, ChatResponse, chat_with_dog, clear_conversation
+from services.human_chat import (
+    HumanChatRequest,
+    HumanChatResponse,
+    chat_with_companion,
+    clear_human_conversation,
+)
 
 # 导入世界快照路由和数据库初始化
 from routers import world
@@ -431,10 +437,62 @@ async def api_clear_chat(session_id: str = "default"):
     return {"status": "ok", "message": "Conversation cleared"}
 
 
+@app.post("/human-chat", response_model=HumanChatResponse)
+async def api_human_chat(request: HumanChatRequest):
+    """
+    Human companion chat endpoint.
+
+    Request Body:
+        message: User's message
+        session_id: Optional session ID for conversation history
+        companion_name: Optional companion name
+
+    Returns:
+        Companion's response
+    """
+    print(f"[HumanChat] Message: {request.message[:50]}...")
+
+    try:
+        response = chat_with_companion(
+            message=request.message,
+            session_id=request.session_id or "default",
+            companion_name=request.companion_name or "伴侣"
+        )
+        return HumanChatResponse(
+            response=response,
+            session_id=request.session_id or "default"
+        )
+    except Exception as e:
+        print(f"[HumanChat] Error: {e}")
+        return HumanChatResponse(
+            response="我在这里，只是刚刚有点走神了。你再和我说一次，好吗？",
+            session_id=request.session_id or "default"
+        )
+
+
+@app.post("/human-chat/clear")
+async def api_clear_human_chat(session_id: str = "default"):
+    """
+    Clear human chat conversation history for a session.
+    """
+    clear_human_conversation(session_id)
+    return {"status": "ok", "message": "Human conversation cleared"}
+
+
 @app.get("/health")
 async def health():
     """健康检查"""
-    return {"status": "ok", "services": ["text2image", "image2image", "image23d", "text23d"]}
+    return {
+        "status": "ok",
+        "services": [
+            "text2image",
+            "image2image",
+            "image23d",
+            "text23d",
+            "dog_chat",
+            "human_chat",
+        ],
+    }
 
 
 @app.get("/")
@@ -451,6 +509,8 @@ async def root():
             "POST /workspaces/join": "Join workspace and get server address",
             "POST /world/{world_id}": "创建或更新世界快照",
             "GET /world/{world_id}": "获取世界快照",
+            "POST /chat": "狗狗伙伴聊天",
+            "POST /human-chat": "玩家伴侣聊天",
             "POST /text2image": "文字生成图片 (返回 PNG)",
             "POST /text2image/urls": "文字生成图片 (返回 URL 列表)",
             "GET /text2image/task/{task_id}": "查询文生图任务状态",
@@ -500,6 +560,12 @@ from urllib.parse import urlparse
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
 from services.dog_chat import ChatRequest, ChatResponse, chat_with_dog, clear_conversation
+from services.human_chat import (
+    HumanChatRequest,
+    HumanChatResponse,
+    chat_with_companion,
+    clear_human_conversation,
+)
 
 # 导入世界快照路由和数据库初始化
 from routers import world, world_manager
@@ -990,10 +1056,62 @@ async def api_clear_chat(session_id: str = "default"):
     return {"status": "ok", "message": "Conversation cleared"}
 
 
+@app.post("/human-chat", response_model=HumanChatResponse)
+async def api_human_chat(request: HumanChatRequest):
+    """
+    Human companion chat endpoint.
+
+    Request Body:
+        message: User's message
+        session_id: Optional session ID for conversation history
+        companion_name: Optional companion name
+
+    Returns:
+        Companion's response
+    """
+    print(f"[HumanChat] Message: {request.message[:50]}...")
+
+    try:
+        response = chat_with_companion(
+            message=request.message,
+            session_id=request.session_id or "default",
+            companion_name=request.companion_name or "伴侣"
+        )
+        return HumanChatResponse(
+            response=response,
+            session_id=request.session_id or "default"
+        )
+    except Exception as e:
+        print(f"[HumanChat] Error: {e}")
+        return HumanChatResponse(
+            response="我在这里，只是刚刚有点走神了。你再和我说一次，好吗？",
+            session_id=request.session_id or "default"
+        )
+
+
+@app.post("/human-chat/clear")
+async def api_clear_human_chat(session_id: str = "default"):
+    """
+    Clear human chat conversation history for a session.
+    """
+    clear_human_conversation(session_id)
+    return {"status": "ok", "message": "Human conversation cleared"}
+
+
 @app.get("/health")
 async def health():
     """健康检查"""
-    return {"status": "ok", "services": ["text2image", "image2image", "image23d", "text23d"]}
+    return {
+        "status": "ok",
+        "services": [
+            "text2image",
+            "image2image",
+            "image23d",
+            "text23d",
+            "dog_chat",
+            "human_chat",
+        ],
+    }
 
 
 @app.get("/")
@@ -1009,6 +1127,8 @@ async def root():
             "POST /workspaces/create": "Create workspace with optional co-owners",
             "POST /world/{world_id}": "创建或更新世界快照",
             "GET /world/{world_id}": "获取世界快照",
+            "POST /chat": "狗狗伙伴聊天",
+            "POST /human-chat": "玩家伴侣聊天",
             "POST /text2image": "文字生成图片 (返回 PNG)",
             "POST /text2image/urls": "文字生成图片 (返回 URL 列表)",
             "GET /text2image/task/{task_id}": "查询文生图任务状态",

@@ -12,7 +12,29 @@ namespace Morphis.WorldSnapshot
     /// </summary>
     public class HttpWorldService : MonoBehaviour
     {
+        private static HttpWorldService instance;
+
         private string GetBaseUrl() => Morphis.Config.AppConfig.Instance.ApiBaseUrl;
+
+        private void Awake()
+        {
+            if (instance != null && instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
+        private void OnDestroy()
+        {
+            if (instance == this)
+            {
+                instance = null;
+            }
+        }
 
         private string GetAppSessionToken()
         {
@@ -245,11 +267,21 @@ namespace Morphis.WorldSnapshot
         /// </summary>
         public static HttpWorldService GetOrCreate()
         {
-            var instance = FindFirstObjectByType<HttpWorldService>();
-            if (instance != null) return instance;
+            if (instance != null)
+            {
+                return instance;
+            }
+
+            instance = FindFirstObjectByType<HttpWorldService>();
+            if (instance != null)
+            {
+                DontDestroyOnLoad(instance.gameObject);
+                return instance;
+            }
 
             var go = new GameObject("HttpWorldService");
-            return go.AddComponent<HttpWorldService>();
+            instance = go.AddComponent<HttpWorldService>();
+            return instance;
         }
     }
 }
