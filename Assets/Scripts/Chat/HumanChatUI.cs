@@ -22,6 +22,7 @@ namespace Morphis.Chat
         [SerializeField] private Color userAvatarColor = new Color(0.14f, 0.46f, 0.82f, 1f);
         [SerializeField] private Color assistantAvatarColor = new Color(0.17f, 0.58f, 0.35f, 1f);
         [SerializeField] private float popupDuration = 0.95f;
+        [SerializeField] private float maxBubbleTextWidth = 210f;
 
         private GameObject chatPanel;
         private RectTransform chatPanelRect;
@@ -462,8 +463,8 @@ namespace Morphis.Chat
 
             var bubbleLayout = bubbleObj.AddComponent<HorizontalLayoutGroup>();
             bubbleLayout.padding = new RectOffset(14, 14, 10, 10);
-            bubbleLayout.childControlWidth = false;
-            bubbleLayout.childControlHeight = false;
+            bubbleLayout.childControlWidth = true;
+            bubbleLayout.childControlHeight = true;
             bubbleLayout.childForceExpandWidth = false;
             bubbleLayout.childForceExpandHeight = false;
 
@@ -478,16 +479,24 @@ namespace Morphis.Chat
             textObj.transform.SetParent(bubbleObj.transform, false);
 
             TextMeshProUGUI text = textObj.AddComponent<TextMeshProUGUI>();
+            RectTransform textRect = text.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.pivot = new Vector2(0.5f, 0.5f);
+            textRect.sizeDelta = Vector2.zero;
             text.text = message;
             text.fontSize = 19;
             text.color = Color.white;
             text.enableWordWrapping = true;
+            text.textWrappingMode = TextWrappingModes.Normal;
+            text.overflowMode = TextOverflowModes.Overflow;
             text.alignment = TextAlignmentOptions.Left;
 
-            Vector2 preferred = text.GetPreferredValues(message, 210f, 0f);
+            float textWidth = Mathf.Max(120f, maxBubbleTextWidth);
+            Vector2 preferred = text.GetPreferredValues(message, textWidth, 0f);
             var textLayout = textObj.AddComponent<LayoutElement>();
-            textLayout.preferredWidth = Mathf.Min(210f, preferred.x);
-            textLayout.preferredHeight = preferred.y + 2f;
+            textLayout.preferredWidth = Mathf.Min(textWidth, preferred.x);
+            textLayout.preferredHeight = preferred.y + 4f;
         }
 
         private GameObject CreateChild(GameObject parent, string name, Vector2 anchorMin, Vector2 anchorMax,

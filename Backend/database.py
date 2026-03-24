@@ -52,6 +52,6 @@ def init_db():
     初始化数据库：先校验连接，再创建所有表。连接失败则抛错，不静默启动。
     """
     check_connection()
-    from models import user, world, world_snapshot  # 注册到 Base.metadata
+    from models import user, friend, world, world_snapshot  # 注册到 Base.metadata
     Base.metadata.create_all(bind=engine)
     print("[Database] Tables created successfully")

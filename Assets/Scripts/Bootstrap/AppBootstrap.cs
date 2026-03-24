@@ -168,7 +168,7 @@ namespace Morphis
             var go = new GameObject("WorldServerReporter(Auto)");
             Object.DontDestroyOnLoad(go);
             // 通过反射方式添加组件，避免编译期依赖命名空间
-            var reporterType = System.Type.GetType("Morphis.WorldSnapshot.WorldServerReporter");
+            var reporterType = ResolveType("Morphis.WorldSnapshot.WorldServerReporter");
             if (reporterType != null && reporterType.IsSubclassOf(typeof(MonoBehaviour)))
             {
                 go.AddComponent(reporterType);
@@ -176,8 +176,30 @@ namespace Morphis
             }
             else
             {
+                Object.Destroy(go);
                 Debug.LogWarning("[AppBootstrap] Failed to locate Morphis.WorldSnapshot.WorldServerReporter type. Player count reporting will be disabled.");
             }
+        }
+
+        private static System.Type ResolveType(string fullTypeName)
+        {
+            var type = System.Type.GetType(fullTypeName);
+            if (type != null)
+            {
+                return type;
+            }
+
+            var assemblies = System.AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var assembly in assemblies)
+            {
+                type = assembly.GetType(fullTypeName);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+
+            return null;
         }
 
         private static void DestroyAllNetworkHud()

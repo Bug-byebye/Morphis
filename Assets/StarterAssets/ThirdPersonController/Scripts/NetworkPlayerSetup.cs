@@ -6,6 +6,8 @@ using Mirror;
 using UnityEngine.InputSystem;
 #endif
 using Morphis;
+using Morphis.AppFlow;
+using Morphis.Friends;
 using Morphis.WorldSnapshot;
 using Morphis.ModelPlacement;
 using GLTFast;
@@ -34,6 +36,9 @@ namespace StarterAssets
 
         public static NetworkPlayerSetup Local { get; private set; }
 
+        [SyncVar(hook = nameof(OnDisplayNameChanged))]
+        private string displayName = "玩家";
+
         [Header("Components to disable for remote players")]
         [Tooltip("这些组件会在远程玩家上被禁用（可选扩展）")]
         public MonoBehaviour[] componentsToDisableForRemote;
@@ -41,6 +46,24 @@ namespace StarterAssets
         [Header("Cinemachine")]
         [Tooltip("Cinemachine 跟随目标（通常是 PlayerCameraRoot）")]
         public Transform cinemachineFollowTarget;
+
+        public string DisplayName
+        {
+            get
+            {
+                if (!string.IsNullOrWhiteSpace(displayName))
+                {
+                    return displayName;
+                }
+
+                if (isLocalPlayer && !string.IsNullOrWhiteSpace(AppSession.Username))
+                {
+                    return AppSession.Username;
+                }
+
+                return "玩家";
+            }
+        }
 
         // 本地玩家上报位置给服务器的节流
         private float _lastPositionSyncTime;
@@ -75,6 +98,8 @@ namespace StarterAssets
 
             // 绑定所有 Cinemachine 虚拟相机的 Follow / LookAt
             SetupCameraForLocalPlayer();
+            EnsurePlayerUiAffordances();
+            TrySyncDisplayNameFromSession();
 
             Debug.Log($"[NetworkPlayerSetup] Local player setup complete: {gameObject.name}");
         }
@@ -94,6 +119,19 @@ namespace StarterAssets
                 // Safety: ensure local player always has components enabled
                 EnableComponents(true);
                 Debug.Log($"[NetworkPlayerSetup] Local player components ensured enabled: {gameObject.name}");
+            }
+
+            EnsurePlayerUiAffordances();
+            RefreshPlayerNameTag();
+        }
+
+        public override void OnStopClient()
+        {
+            base.OnStopClient();
+
+            if (Local == this)
+            {
+                Local = null;
             }
         }
 
@@ -235,6 +273,22 @@ namespace StarterAssets
             }
         }
 
+        public Transform GetNameTagAnchor()
+        {
+            if (cinemachineFollowTarget != null)
+            {
+                return cinemachineFollowTarget;
+            }
+
+            var cameraRoot = transform.Find("PlayerCameraRoot");
+            if (cameraRoot != null)
+            {
+                return cameraRoot;
+            }
+
+            return transform;
+        }
+
         // ==========================================================
         // Client API (called by UI / mover) -> Command -> Server -> RPC
         // ==========================================================
@@ -350,6 +404,24 @@ namespace StarterAssets
             transform.position = position;
             transform.rotation = rotation;
             RpcSyncPosition(position, rotation);
+        }
+
+        [Command]
+        private void CmdSetDisplayName(string requestedDisplayName)
+        {
+            var sanitized = (requestedDisplayName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(sanitized))
+            {
+                return;
+            }
+
+            if (sanitized.Length > 24)
+            {
+                sanitized = sanitized.Substring(0, 24);
+            }
+
+            displayName = sanitized;
+            gameObject.name = $"Player[{sanitized}]";
         }
 
         [Command]
@@ -687,6 +759,83 @@ namespace StarterAssets
                 snapshot.objects.Add(kv.Value);
             }
             return snapshot;
+        }
+
+        private void TrySyncDisplayNameFromSession()
+        {
+            if (!isLocalPlayer)
+            {
+                return;
+            }
+
+            var username = (AppSession.Username ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(username))
+            {
+                return;
+            }
+
+            CmdSetDisplayName(username);
+            RefreshPlayerNameTag();
+        }
+
+        private void EnsurePlayerUiAffordances()
+        {
+            EnsureFriendInteractionHitbox();
+            EnsurePlayerNameTag();
+        }
+
+        private void EnsurePlayerNameTag()
+        {
+            var nameTag = GetComponent<PlayerNameTag>();
+            if (nameTag == null)
+            {
+                nameTag = gameObject.AddComponent<PlayerNameTag>();
+            }
+
+            nameTag.Bind(this);
+        }
+
+        private void RefreshPlayerNameTag()
+        {
+            var nameTag = GetComponent<PlayerNameTag>();
+            if (nameTag != null)
+            {
+                nameTag.RefreshNow();
+            }
+        }
+
+        private void EnsureFriendInteractionHitbox()
+        {
+            var existing = transform.Find("FriendInteractionHitbox");
+            if (existing != null)
+            {
+                var existingCollider = existing.GetComponent<CapsuleCollider>();
+                if (existingCollider != null)
+                {
+                    existingCollider.isTrigger = true;
+                    existingCollider.center = new Vector3(0f, 1f, 0f);
+                    existingCollider.height = 2f;
+                    existingCollider.radius = 0.4f;
+                }
+                return;
+            }
+
+            var hitbox = new GameObject("FriendInteractionHitbox");
+            hitbox.transform.SetParent(transform, false);
+            hitbox.transform.localPosition = Vector3.zero;
+            hitbox.transform.localRotation = Quaternion.identity;
+            hitbox.transform.localScale = Vector3.one;
+
+            var capsule = hitbox.AddComponent<CapsuleCollider>();
+            capsule.isTrigger = true;
+            capsule.center = new Vector3(0f, 1f, 0f);
+            capsule.height = 2f;
+            capsule.radius = 0.4f;
+        }
+
+        private void OnDisplayNameChanged(string oldValue, string newValue)
+        {
+            RefreshPlayerNameTag();
         }
     }
 }

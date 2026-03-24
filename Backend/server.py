@@ -33,7 +33,22 @@ from services.human_chat import (
 # 导入世界快照路由和数据库初始化
 from routers import world
 from database import init_db, get_db
-from crud import get_user_by_username, create_user, get_workspaces_for_user, get_or_create_world, create_workspace_with_coowners
+from crud import (
+    get_user_by_username,
+    create_user,
+    get_workspaces_for_user,
+    get_or_create_world,
+    create_workspace_with_coowners,
+    are_friends,
+    get_friendship_rows_for_user,
+    get_incoming_friend_request_rows,
+    get_outgoing_friend_request_rows,
+    get_pending_friend_request_between,
+    get_pending_friend_request_for_receiver,
+    create_friend_request,
+    accept_friend_request,
+    decline_friend_request,
+)
 from models.world import WorldMember
 
 app = FastAPI(title="AI Generation Pipeline Server")
@@ -571,7 +586,22 @@ from services.human_chat import (
 from routers import world, world_manager
 from database import init_db, get_db
 from config import get_api_base_url, get_server_listen_address, get_server_port
-from crud import get_user_by_username, create_user, get_workspaces_for_user, get_or_create_world, create_workspace_with_coowners
+from crud import (
+    get_user_by_username,
+    create_user,
+    get_workspaces_for_user,
+    get_or_create_world,
+    create_workspace_with_coowners,
+    are_friends,
+    get_friendship_rows_for_user,
+    get_incoming_friend_request_rows,
+    get_outgoing_friend_request_rows,
+    get_pending_friend_request_between,
+    get_pending_friend_request_for_receiver,
+    create_friend_request,
+    accept_friend_request,
+    decline_friend_request,
+)
 from models.world import WorldMember
 
 app = FastAPI(title="AI Generation Pipeline Server")
@@ -656,6 +686,33 @@ class JoinWorldResponse(BaseModel):
     server_address: str
     server_port: int
     message: str = ""
+
+
+class FriendDto(BaseModel):
+    username: str
+
+
+class FriendRequestDto(BaseModel):
+    id: int
+    sender_username: str
+    receiver_username: str
+    status: str
+    created_at: Optional[str] = None
+
+
+class FriendsStateResponse(BaseModel):
+    friends: List[FriendDto]
+    incoming_requests: List[FriendRequestDto]
+    outgoing_requests: List[FriendRequestDto]
+
+
+class SendFriendRequestPayload(BaseModel):
+    target_username: str
+
+
+class FriendActionResponse(BaseModel):
+    status: str
+    message: str
 
 
 # ========== 会话：token -> username（内存，重启后需重新登录） ==========
@@ -1096,6 +1153,139 @@ async def api_clear_human_chat(session_id: str = "default"):
     """
     clear_human_conversation(session_id)
     return {"status": "ok", "message": "Human conversation cleared"}
+
+
+@app.get("/friends", response_model=FriendsStateResponse)
+async def list_friends(
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+
+    user = get_user_by_username(db, username)
+    if user is None:
+        return Response(content="User not found", status_code=401)
+
+    friend_rows = get_friendship_rows_for_user(db, user.id)
+    incoming_rows = get_incoming_friend_request_rows(db, user.id)
+    outgoing_rows = get_outgoing_friend_request_rows(db, user.id)
+
+    return FriendsStateResponse(
+        friends=[
+            FriendDto(username=friend_user.username)
+            for _, friend_user in friend_rows
+        ],
+        incoming_requests=[
+            FriendRequestDto(
+                id=friend_request.id,
+                sender_username=sender_user.username,
+                receiver_username=username,
+                status=friend_request.status.value,
+                created_at=friend_request.created_at.isoformat() if friend_request.created_at else None,
+            )
+            for friend_request, sender_user in incoming_rows
+        ],
+        outgoing_requests=[
+            FriendRequestDto(
+                id=friend_request.id,
+                sender_username=username,
+                receiver_username=receiver_user.username,
+                status=friend_request.status.value,
+                created_at=friend_request.created_at.isoformat() if friend_request.created_at else None,
+            )
+            for friend_request, receiver_user in outgoing_rows
+        ],
+    )
+
+
+@app.post("/friends/requests", response_model=FriendActionResponse)
+async def send_friend_request(
+    request: SendFriendRequestPayload,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+
+    sender = get_user_by_username(db, username)
+    if sender is None:
+        return Response(content="User not found", status_code=401)
+
+    target_username = (request.target_username or "").strip()
+    if not target_username:
+        return Response(content="target_username required", status_code=400)
+    if target_username == username:
+        return Response(content="Cannot add yourself as a friend", status_code=400)
+
+    receiver = get_user_by_username(db, target_username)
+    if receiver is None:
+        return Response(content="Target user not found", status_code=404)
+
+    if are_friends(db, sender.id, receiver.id):
+        return Response(content="You are already friends", status_code=409)
+
+    existing_pending = get_pending_friend_request_between(db, sender.id, receiver.id)
+    if existing_pending is not None:
+        if existing_pending.sender_user_id == receiver.id:
+            return Response(content="This user already sent you a friend request", status_code=409)
+        return Response(content="Friend request already sent", status_code=409)
+
+    create_friend_request(db, sender.id, receiver.id)
+    return FriendActionResponse(
+        status="ok",
+        message=f"Friend request sent to {receiver.username}",
+    )
+
+
+@app.post("/friends/requests/{request_id}/accept", response_model=FriendActionResponse)
+async def accept_friend_request_api(
+    request_id: int,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+
+    user = get_user_by_username(db, username)
+    if user is None:
+        return Response(content="User not found", status_code=401)
+
+    friend_request = get_pending_friend_request_for_receiver(db, request_id, user.id)
+    if friend_request is None:
+        return Response(content="Friend request not found", status_code=404)
+
+    accept_friend_request(db, friend_request)
+    return FriendActionResponse(status="ok", message="Friend request accepted")
+
+
+@app.post("/friends/requests/{request_id}/decline", response_model=FriendActionResponse)
+async def decline_friend_request_api(
+    request_id: int,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        username = _require_user(authorization)
+    except ValueError as e:
+        return Response(content=str(e), status_code=401)
+
+    user = get_user_by_username(db, username)
+    if user is None:
+        return Response(content="User not found", status_code=401)
+
+    friend_request = get_pending_friend_request_for_receiver(db, request_id, user.id)
+    if friend_request is None:
+        return Response(content="Friend request not found", status_code=404)
+
+    decline_friend_request(db, friend_request)
+    return FriendActionResponse(status="ok", message="Friend request declined")
 
 
 @app.get("/health")
