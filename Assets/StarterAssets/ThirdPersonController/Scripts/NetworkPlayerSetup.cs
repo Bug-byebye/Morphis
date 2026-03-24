@@ -42,6 +42,10 @@ namespace StarterAssets
         [Tooltip("Cinemachine 跟随目标（通常是 PlayerCameraRoot）")]
         public Transform cinemachineFollowTarget;
 
+        // 本地玩家上报位置给服务器的节流
+        private float _lastPositionSyncTime;
+        private const float PositionSyncInterval = 0.05f;
+
         public override void OnStartServer()
         {
             base.OnStartServer();
@@ -90,6 +94,19 @@ namespace StarterAssets
                 // Safety: ensure local player always has components enabled
                 EnableComponents(true);
                 Debug.Log($"[NetworkPlayerSetup] Local player components ensured enabled: {gameObject.name}");
+            }
+        }
+
+        private void Update()
+        {
+            // 仅本地玩家在联机状态下上报自己的 Transform，由服务器转发给其他客户端
+            if (!isLocalPlayer) return;
+            if (!NetworkClient.active) return;
+
+            if (Time.time - _lastPositionSyncTime >= PositionSyncInterval)
+            {
+                _lastPositionSyncTime = Time.time;
+                CmdReportPosition(transform.position, transform.rotation);
             }
         }
 
@@ -256,6 +273,15 @@ namespace StarterAssets
             return true;
         }
 
+        public bool RequestSetComment(string objectId, string comment)
+        {
+            if (!isLocalPlayer) return false;
+            if (!NetworkClient.active) return false;
+            if (string.IsNullOrEmpty(objectId)) return false;
+            CmdRequestSetComment(objectId, comment ?? string.Empty);
+            return true;
+        }
+
         // =========================
         // Commands (Client -> Server)
         // =========================
@@ -317,6 +343,27 @@ namespace StarterAssets
                 onError: err => Debug.LogWarning($"[WorldAuthority] Save failed: {err}"));
         }
 
+        [Command(channel = Channels.Unreliable)]
+        private void CmdReportPosition(Vector3 position, Quaternion rotation)
+        {
+            // 在服务器上更新权威 Transform，并广播给所有客户端
+            transform.position = position;
+            transform.rotation = rotation;
+            RpcSyncPosition(position, rotation);
+        }
+
+        [Command]
+        private void CmdRequestSetComment(string objectId, string comment)
+        {
+            if (string.IsNullOrEmpty(objectId)) return;
+            if (!_serverObjects.TryGetValue(objectId, out var data)) return;
+
+            data.comment = comment ?? string.Empty;
+            _serverWorldVersion++;
+
+            RpcSetComment(objectId, comment ?? string.Empty);
+        }
+
         // =========================
         // RPCs (Server -> Clients)
         // =========================
@@ -351,6 +398,15 @@ namespace StarterAssets
             _clientObjects.Remove(objectId);
         }
 
+        [ClientRpc(channel = Channels.Unreliable)]
+        private void RpcSyncPosition(Vector3 position, Quaternion rotation)
+        {
+            // 跳过本地玩家，本地由输入系统驱动
+            if (isLocalPlayer) return;
+            transform.position = position;
+            transform.rotation = rotation;
+        }
+
         [TargetRpc]
         private void TargetApplySnapshotJson(NetworkConnectionToClient target, string snapshotJson)
         {
@@ -363,6 +419,22 @@ namespace StarterAssets
         {
             if (string.IsNullOrEmpty(snapshotJson)) return;
             ApplySnapshotJson(snapshotJson);
+        }
+
+        [ClientRpc]
+        private void RpcSetComment(string objectId, string comment)
+        {
+            if (string.IsNullOrEmpty(objectId)) return;
+            if (!_clientObjects.TryGetValue(objectId, out var go) || go == null) return;
+
+            var interactable = go.GetComponent<InteractableObject>();
+            if (interactable != null)
+            {
+                if (string.IsNullOrEmpty(comment))
+                    interactable.ClearComment();
+                else
+                    interactable.SetComment(comment);
+            }
         }
 
         private void ApplySnapshotJson(string snapshotJson)

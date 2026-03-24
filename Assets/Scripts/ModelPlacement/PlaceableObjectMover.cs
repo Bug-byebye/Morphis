@@ -208,6 +208,25 @@ namespace Morphis.ModelPlacement
             _dragging = false;
             SetCollidersEnabled(true);
             Debug.Log($"[PlaceableObjectMover] Placed/Confirmed {name}");
+
+            // 联机模式：将最终 Transform 提交给服务器权威
+            if (NetworkClient.active)
+            {
+                var worldObj = GetComponent<Morphis.WorldSnapshot.WorldObject>();
+                if (worldObj != null && StarterAssets.NetworkPlayerSetup.Local != null)
+                {
+                    bool ok = StarterAssets.NetworkPlayerSetup.Local.RequestMove(
+                        worldObj.ObjectId,
+                        transform.position,
+                        transform.rotation,
+                        transform.localScale
+                    );
+                    if (!ok)
+                    {
+                        Debug.LogWarning($"[PlaceableObjectMover] RequestMove failed for object '{worldObj.ObjectId}'.");
+                    }
+                }
+            }
         }
 
         private void UpdateRotate()
@@ -283,8 +302,23 @@ namespace Morphis.ModelPlacement
                 ObjectInteractionManager.ClearTargetsIfExists();
 
             Debug.Log($"[PlaceableObjectMover] Deleted {name}");
-            Destroy(gameObject);
-            RequestServerAutosaveNextFrame();
+
+            var worldObj = GetComponent<Morphis.WorldSnapshot.WorldObject>();
+            if (NetworkClient.active && StarterAssets.NetworkPlayerSetup.Local != null && worldObj != null)
+            {
+                bool ok = StarterAssets.NetworkPlayerSetup.Local.RequestDelete(worldObj.ObjectId);
+                if (!ok)
+                {
+                    Debug.LogWarning($"[PlaceableObjectMover] RequestDelete failed for object '{worldObj.ObjectId}'. Falling back to local destroy.");
+                    Destroy(gameObject);
+                    RequestServerAutosaveNextFrame();
+                }
+            }
+            else
+            {
+                Destroy(gameObject);
+                RequestServerAutosaveNextFrame();
+            }
         }
 
         private static void RequestServerAutosaveNextFrame()

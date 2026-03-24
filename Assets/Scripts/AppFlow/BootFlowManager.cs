@@ -1549,3 +1549,4 @@ namespace Morphis.AppFlow
         }
     }
 }
+// {"world_id": "ws-89964cb4533f", "version": 1, "objects": [{"object_id": "e6ab608c-5e1e-4102-844d-1639ec63a80a", "prefab_id": "Placeables/generated_639050625596004370", "comment": "", "pos_x": -8.003462791442871, "pos_y": -0.1170467734336853, "pos_z": 1.088456392288208, "rot_x": 0.0, "rot_y": 0.0, "rot_z": 0.0, "rot_w": 1.0, "scale_x": 1.0, "scale_y": 1.0, "scale_z": 1.0}]}
