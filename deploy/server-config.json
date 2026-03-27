@@ -4,15 +4,15 @@
   "ServerPort": 7777,
   "DefaultWorldId": "default-world",
   "Database": {
-    "Host": "pgm-bp18b2zkp3d07pz8so.pg.rds.aliyuncs.com",
+    "Host": "localhost",
     "Port": 5432,
     "Name": "morphis-data",
     "User": "MorphisServer",
     "Password": "Morphis1234"
   },
   "UnityServer": {
-    "ExecutablePath": "/home/huangfengr/MorphisServer/Morphis.x86_64",
-    "LogDirectory": "/home/huangfengr/Morphis/logs/worlds",
+    "ExecutablePath": "/home/huangfengr/extra/MorphisServer/Morphis.x86_64",
+    "LogDirectory": "/home/huangfengr/extra/Morphis/logs/worlds",
     "BasePort": 7777,
     "MaxWorlds": 50,
     "IdleTimeoutMinutes": 5
