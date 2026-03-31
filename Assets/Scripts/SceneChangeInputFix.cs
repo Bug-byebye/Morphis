@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Mirror;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -16,6 +17,7 @@ public class SceneChangeInputFix : MonoBehaviour
     private MonoBehaviour thirdPersonController;
     private MonoBehaviour starterInputs;
     private CharacterController characterController;
+    private NetworkIdentity networkIdentity;
     
     private void Awake()
     {
@@ -23,6 +25,7 @@ public class SceneChangeInputFix : MonoBehaviour
         playerInput = GetComponent<PlayerInput>();
 #endif
         characterController = GetComponent<CharacterController>();
+        networkIdentity = GetComponent<NetworkIdentity>();
         
         var tpcType = System.Type.GetType("StarterAssets.ThirdPersonController, Assembly-CSharp");
         if (tpcType != null) thirdPersonController = GetComponent(tpcType) as MonoBehaviour;
@@ -41,6 +44,11 @@ public class SceneChangeInputFix : MonoBehaviour
     
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        if (!ShouldFixLocalPlayer())
+        {
+            return;
+        }
+
         Debug.Log($"[SceneChangeInputFix] 场景加载: {scene.name}，开始修复输入...");
         
         // 延迟修复，确保所有组件都初始化完成
@@ -49,6 +57,11 @@ public class SceneChangeInputFix : MonoBehaviour
     
     private void FixInputAfterSceneLoad()
     {
+        if (!ShouldFixLocalPlayer())
+        {
+            return;
+        }
+
         Debug.Log("[SceneChangeInputFix] 执行修复...");
         
         // 1. 重新启用CharacterController
@@ -99,10 +112,25 @@ public class SceneChangeInputFix : MonoBehaviour
     // 手动触发修复（按F3键）
     private void Update()
     {
+        if (!ShouldFixLocalPlayer())
+        {
+            return;
+        }
+
         if (Input.GetKeyDown(KeyCode.F3))
         {
             Debug.Log("[SceneChangeInputFix] 手动触发修复（按F3）");
             FixInputAfterSceneLoad();
         }
+    }
+
+    private bool ShouldFixLocalPlayer()
+    {
+        if (Application.isBatchMode)
+        {
+            return false;
+        }
+
+        return networkIdentity == null || networkIdentity.isLocalPlayer;
     }
 }

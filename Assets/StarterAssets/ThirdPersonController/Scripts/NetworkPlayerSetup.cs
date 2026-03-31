@@ -67,7 +67,15 @@ namespace StarterAssets
 
         // 本地玩家上报位置给服务器的节流
         private float _lastPositionSyncTime;
-        private const float PositionSyncInterval = 0.05f;
+        private const float PositionSyncInterval = 1f / 30f;
+        private const float RemotePositionSmoothing = 18f;
+        private const float RemoteRotationSmoothing = 18f;
+        private const float RemoteSnapDistance = 3.5f;
+
+        private bool _isRemoteReplica;
+        private bool _hasRemoteState;
+        private Vector3 _remoteTargetPosition;
+        private Quaternion _remoteTargetRotation = Quaternion.identity;
 
         public override void OnStartServer()
         {
@@ -110,6 +118,11 @@ namespace StarterAssets
 
             if (!isLocalPlayer)
             {
+                _isRemoteReplica = true;
+                _hasRemoteState = true;
+                _remoteTargetPosition = transform.position;
+                _remoteTargetRotation = transform.rotation;
+
                 // 远程玩家：只作为被同步的可见角色
                 DisableRemotePlayerComponents();
                 Debug.Log($"[NetworkPlayerSetup] Remote player input/camera disabled: {gameObject.name}");
@@ -137,8 +150,13 @@ namespace StarterAssets
 
         private void Update()
         {
+            if (!isLocalPlayer)
+            {
+                UpdateRemoteReplicaTransform();
+                return;
+            }
+
             // 仅本地玩家在联机状态下上报自己的 Transform，由服务器转发给其他客户端
-            if (!isLocalPlayer) return;
             if (!NetworkClient.active) return;
 
             if (Time.time - _lastPositionSyncTime >= PositionSyncInterval)
@@ -146,6 +164,20 @@ namespace StarterAssets
                 _lastPositionSyncTime = Time.time;
                 CmdReportPosition(transform.position, transform.rotation);
             }
+        }
+
+        private void UpdateRemoteReplicaTransform()
+        {
+            if (!_isRemoteReplica || !_hasRemoteState)
+            {
+                return;
+            }
+
+            float positionLerp = 1f - Mathf.Exp(-RemotePositionSmoothing * Time.deltaTime);
+            float rotationLerp = 1f - Mathf.Exp(-RemoteRotationSmoothing * Time.deltaTime);
+
+            transform.position = Vector3.Lerp(transform.position, _remoteTargetPosition, positionLerp);
+            transform.rotation = Quaternion.Slerp(transform.rotation, _remoteTargetRotation, rotationLerp);
         }
 
         /// <summary>
@@ -475,8 +507,17 @@ namespace StarterAssets
         {
             // 跳过本地玩家，本地由输入系统驱动
             if (isLocalPlayer) return;
-            transform.position = position;
-            transform.rotation = rotation;
+
+            _remoteTargetPosition = position;
+            _remoteTargetRotation = rotation;
+
+            if (!_hasRemoteState || Vector3.Distance(transform.position, position) >= RemoteSnapDistance)
+            {
+                transform.position = position;
+                transform.rotation = rotation;
+            }
+
+            _hasRemoteState = true;
         }
 
         [TargetRpc]

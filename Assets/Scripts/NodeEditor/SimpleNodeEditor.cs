@@ -3,6 +3,7 @@ using System.IO;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using Mirror;
 using TMPro;
 using System.Collections.Generic;
 using System.Collections;
@@ -44,7 +45,22 @@ namespace AIPipeline.UI
         /// <summary>Always find the current PlayerInput fresh — never cache across scenes.</summary>
         private PlayerInput FindPlayerInput()
         {
-            return FindObjectOfType<PlayerInput>();
+            var allInputs = FindObjectsByType<PlayerInput>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var playerInput in allInputs)
+            {
+                if (playerInput == null)
+                {
+                    continue;
+                }
+
+                var identity = playerInput.GetComponent<NetworkIdentity>();
+                if (identity == null || identity.isLocalPlayer)
+                {
+                    return playerInput;
+                }
+            }
+
+            return null;
         }
 
         [Header("Main UI")]

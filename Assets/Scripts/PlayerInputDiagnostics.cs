@@ -1,4 +1,5 @@
 using UnityEngine;
+using Mirror;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -14,6 +15,7 @@ public class PlayerInputDiagnostics : MonoBehaviour
     [SerializeField] private bool autoFix = true;
     
     private CharacterController characterController;
+    private NetworkIdentity networkIdentity;
 #if ENABLE_INPUT_SYSTEM
     private PlayerInput playerInput;
 #endif
@@ -23,6 +25,7 @@ public class PlayerInputDiagnostics : MonoBehaviour
     private void Awake()
     {
         characterController = GetComponent<CharacterController>();
+        networkIdentity = GetComponent<NetworkIdentity>();
 #if ENABLE_INPUT_SYSTEM
         playerInput = GetComponent<PlayerInput>();
 #endif
@@ -36,7 +39,7 @@ public class PlayerInputDiagnostics : MonoBehaviour
     
     private void Start()
     {
-        if (autoFix)
+        if (autoFix && ShouldDiagnoseLocalPlayer())
         {
             Invoke(nameof(DiagnoseAndFix), 0.5f); // 延迟0.5秒确保所有组件都初始化完成
         }
@@ -44,6 +47,11 @@ public class PlayerInputDiagnostics : MonoBehaviour
     
     private void Update()
     {
+        if (!ShouldDiagnoseLocalPlayer())
+        {
+            return;
+        }
+
         if (Input.GetKeyDown(KeyCode.F1))
         {
             DiagnoseAndFix();
@@ -58,6 +66,11 @@ public class PlayerInputDiagnostics : MonoBehaviour
     [ContextMenu("Diagnose and Fix Input Issues")]
     public void DiagnoseAndFix()
     {
+        if (!ShouldDiagnoseLocalPlayer())
+        {
+            return;
+        }
+
         Debug.Log("========== 玩家输入诊断开始 ==========");
         
         bool hasIssues = false;
@@ -181,6 +194,11 @@ public class PlayerInputDiagnostics : MonoBehaviour
     [ContextMenu("Log Current State")]
     public void LogCurrentState()
     {
+        if (!ShouldDiagnoseLocalPlayer())
+        {
+            return;
+        }
+
         Debug.Log("========== 当前玩家状态 ==========");
         Debug.Log($"Position: {transform.position}");
         Debug.Log($"Rotation: {transform.rotation.eulerAngles}");
@@ -231,5 +249,15 @@ public class PlayerInputDiagnostics : MonoBehaviour
         Debug.Log($"Input.GetAxis Vertical: {Input.GetAxis("Vertical")}");
         
         Debug.Log("=====================================");
+    }
+
+    private bool ShouldDiagnoseLocalPlayer()
+    {
+        if (Application.isBatchMode)
+        {
+            return false;
+        }
+
+        return networkIdentity == null || networkIdentity.isLocalPlayer;
     }
 }
