@@ -10,5 +10,6 @@ from . import text2image
 from . import image2image
 from . import image23d
 from . import text23d
+from . import tencent_hunyuan_3d
 
-__all__ = ['text2image', 'image2image', 'image23d', 'text23d']
+__all__ = ['text2image', 'image2image', 'image23d', 'text23d', 'tencent_hunyuan_3d']

@@ -9,8 +9,13 @@ FastAPI 服务：为 Unity 节点编辑器提供各种 AI 生成 API
 - GET  /health         - 健康检查
 """
 
+from pathlib import Path
+
 from dotenv import load_dotenv
-load_dotenv()  # 加载 .env 文件
+
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")  # 加载仓库内的安全默认配置
+load_dotenv(BACKEND_DIR / ".env.local", override=True)  # 本地私有配置覆盖默认值
 
 from fastapi import FastAPI, Response, File, UploadFile, Form, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware

@@ -78,6 +78,58 @@ class DoubaoSeed3DConfig:
         return cls.CACHE_DIR
 
 
+class TencentHunyuan3DConfig:
+    """腾讯云混元生 3D 极速版 API 配置"""
+    HOST = os.getenv("TENCENT_AI3D_HOST", "ai3d.tencentcloudapi.com")
+    ENDPOINT = f"https://{HOST}"
+    SERVICE = "ai3d"
+    VERSION = os.getenv("TENCENT_AI3D_VERSION", "2025-05-13")
+    REGION = os.getenv("TENCENT_AI3D_REGION", "ap-guangzhou")
+
+    SECRET_ID = os.getenv("TENCENT_SECRET_ID") or os.getenv("TENCENTCLOUD_SECRET_ID", "")
+    SECRET_KEY = os.getenv("TENCENT_SECRET_KEY") or os.getenv("TENCENTCLOUD_SECRET_KEY", "")
+
+    # 兼容用户手头可能已有的 OpenAI 风格 key；官方 ai3d 接口实际不会用它做签名。
+    API_KEY = os.getenv("TENCENT_HUNYUAN_API_KEY", "")
+
+    RESULT_FORMAT = os.getenv("TENCENT_AI3D_RESULT_FORMAT", "GLB").upper()
+    ENABLE_PBR = os.getenv("TENCENT_AI3D_ENABLE_PBR", "false").lower() == "true"
+    ENABLE_GEOMETRY = os.getenv("TENCENT_AI3D_ENABLE_GEOMETRY", "false").lower() == "true"
+
+    POLL_INTERVAL = int(os.getenv("TENCENT_AI3D_POLL_INTERVAL", "5"))
+    MAX_POLL_TIME = int(os.getenv("TENCENT_AI3D_MAX_POLL_TIME", "600"))
+
+    @classmethod
+    def has_credentials(cls) -> bool:
+        return bool(cls.SECRET_ID and cls.SECRET_KEY)
+
+    @classmethod
+    def validate_credentials(cls):
+        if cls.has_credentials():
+            return
+        if cls.API_KEY:
+            raise RuntimeError(
+                "检测到 TENCENT_HUNYUAN_API_KEY，但腾讯云 ai3d 官方接口使用 "
+                "TC3-HMAC-SHA256 签名，需要 SecretId/SecretKey。"
+            )
+        raise RuntimeError(
+            "缺少腾讯云混元 3D 凭证，请设置 TENCENT_SECRET_ID 和 TENCENT_SECRET_KEY。"
+        )
+
+
+class ThreeDGenerationConfig:
+    """统一的 3D 生成提供方选择"""
+    PROVIDER = os.getenv("THREED_PROVIDER", "auto").strip().lower()
+
+    @classmethod
+    def get_provider(cls) -> str:
+        if cls.PROVIDER in ("", "auto"):
+            if TencentHunyuan3DConfig.has_credentials():
+                return "tencent_hunyuan"
+            return "trellis"
+        return cls.PROVIDER
+
+
 class TrellisConfig:
     """Trellis 3D Generation Server Configuration"""
     BASE_URL = os.getenv("TRELLIS_SERVER_URL", "http://localhost:8001")
