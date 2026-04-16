@@ -7,6 +7,9 @@ using Mirror;
 using TMPro;
 using System.Collections.Generic;
 using System.Collections;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace AIPipeline.UI
 {
@@ -674,6 +677,11 @@ namespace AIPipeline.UI
             {
                 CreateInputField(node, nodeData);
             }
+
+            if (nodeType == "ImageInput")
+            {
+                CreateImageInputArea(node, nodeData);
+            }
             
             // 如果是 Preview，添加图片预览区域
             if (nodeType == "Preview")
@@ -811,6 +819,10 @@ namespace AIPipeline.UI
              nodeList.Remove(node);
 
              // Destroy Objects
+             if (node.sourcePreviewImage != null && node.sourcePreviewImage.texture != null)
+             {
+                 Destroy(node.sourcePreviewImage.texture);
+             }
              if (node.previewModel != null) Destroy(node.previewModel);
              if (node.previewCamera != null && node.previewCamera.gameObject != null) Destroy(node.previewCamera.gameObject);
              if (node.gameObject != null) Destroy(node.gameObject);
@@ -850,11 +862,14 @@ namespace AIPipeline.UI
                  lbl.transform.SetParent(port.transform, false);
                  var tmp = lbl.AddComponent<TextMeshProUGUI>();
                  tmp.text = portName;
-                 tmp.fontSize = 10;
+                 tmp.fontSize = 16;
+                 tmp.fontStyle = FontStyles.Bold;
                  tmp.color = Color.white;
+                 tmp.alignment = isInput ? TextAlignmentOptions.Left : TextAlignmentOptions.Right;
+                 tmp.raycastTarget = false;
                  var rt = lbl.GetComponent<RectTransform>();
-                 rt.sizeDelta = new Vector2(50, 20);
-                 rt.anchoredPosition = new Vector2(isInput ? 30 : -30, 0); 
+                 rt.sizeDelta = new Vector2(88, 26);
+                 rt.anchoredPosition = new Vector2(isInput ? 56 : -56, 0); 
             }
 
             return port;
@@ -943,6 +958,181 @@ namespace AIPipeline.UI
             ph.color = new Color(0.5f, 0.5f, 0.5f);
             
             input.placeholder = ph;
+        }
+
+        private void CreateImageInputArea(GameObject parent, NodeData nodeData)
+        {
+            RectTransform nodeRect = parent.GetComponent<RectTransform>();
+            nodeRect.sizeDelta = new Vector2(320, 300);
+
+            GameObject previewArea = new GameObject("ImagePreviewArea");
+            previewArea.transform.SetParent(parent.transform, false);
+            RectTransform previewRect = previewArea.AddComponent<RectTransform>();
+            previewRect.anchorMin = new Vector2(0.08f, 0.18f);
+            previewRect.anchorMax = new Vector2(0.92f, 0.72f);
+            previewRect.offsetMin = Vector2.zero;
+            previewRect.offsetMax = Vector2.zero;
+
+            Image previewBg = previewArea.AddComponent<Image>();
+            previewBg.color = new Color(0.1f, 0.1f, 0.13f, 0.95f);
+
+            GameObject imgObj = new GameObject("PreviewImage");
+            imgObj.transform.SetParent(previewArea.transform, false);
+            RectTransform imgRect = imgObj.AddComponent<RectTransform>();
+            imgRect.anchorMin = Vector2.zero;
+            imgRect.anchorMax = Vector2.one;
+            imgRect.offsetMin = new Vector2(4f, 4f);
+            imgRect.offsetMax = new Vector2(-4f, -4f);
+
+            RawImage rawImage = imgObj.AddComponent<RawImage>();
+            rawImage.color = Color.white;
+            nodeData.sourcePreviewImage = rawImage;
+
+            GameObject placeholderObj = new GameObject("Placeholder");
+            placeholderObj.transform.SetParent(previewArea.transform, false);
+            StretchToFill(placeholderObj.AddComponent<RectTransform>());
+
+            var placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
+            placeholderText.text = "本地图片\n(未选择)";
+            placeholderText.fontSize = 18;
+            placeholderText.color = new Color(0.58f, 0.6f, 0.66f);
+            placeholderText.alignment = TextAlignmentOptions.Center;
+            placeholderText.raycastTarget = false;
+
+            GameObject buttonObj = new GameObject("SelectImageButton");
+            buttonObj.transform.SetParent(parent.transform, false);
+            RectTransform buttonRect = buttonObj.AddComponent<RectTransform>();
+            buttonRect.anchorMin = new Vector2(0.08f, 0.08f);
+            buttonRect.anchorMax = new Vector2(0.92f, 0.08f);
+            buttonRect.pivot = new Vector2(0.5f, 0f);
+            buttonRect.sizeDelta = new Vector2(0f, 42f);
+
+            Image buttonBg = buttonObj.AddComponent<Image>();
+            buttonBg.color = new Color(0.24f, 0.52f, 0.86f, 0.96f);
+            Button selectButton = buttonObj.AddComponent<Button>();
+            selectButton.onClick.AddListener(() => OnSelectImageForNode(nodeData));
+            nodeData.selectFileButton = selectButton;
+
+            var buttonText = new GameObject("Text").AddComponent<TextMeshProUGUI>();
+            buttonText.transform.SetParent(buttonObj.transform, false);
+            StretchToFill(buttonText.GetComponent<RectTransform>());
+            buttonText.text = "选择图片";
+            buttonText.fontSize = 20;
+            buttonText.fontStyle = FontStyles.Bold;
+            buttonText.color = Color.white;
+            buttonText.alignment = TextAlignmentOptions.Center;
+            buttonText.raycastTarget = false;
+
+            GameObject statusObj = new GameObject("ImageStatus");
+            statusObj.transform.SetParent(parent.transform, false);
+            RectTransform statusRect = statusObj.AddComponent<RectTransform>();
+            statusRect.anchorMin = new Vector2(0.08f, 0.72f);
+            statusRect.anchorMax = new Vector2(0.92f, 0.84f);
+            statusRect.offsetMin = Vector2.zero;
+            statusRect.offsetMax = Vector2.zero;
+
+            var statusText = statusObj.AddComponent<TextMeshProUGUI>();
+            statusText.fontSize = 14;
+            statusText.color = new Color(0.88f, 0.9f, 0.95f, 0.95f);
+            statusText.alignment = TextAlignmentOptions.Center;
+            statusText.enableWordWrapping = true;
+            statusText.text = "未选择图片";
+            statusText.raycastTarget = false;
+            nodeData.sourceStatusLabel = statusText;
+        }
+
+        private void OnSelectImageForNode(NodeData nodeData)
+        {
+            if (nodeData == null)
+            {
+                return;
+            }
+
+#if UNITY_EDITOR
+            string path = EditorUtility.OpenFilePanel("选择本地图片", "", "png,jpg,jpeg,webp,bmp");
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            LoadImageIntoNode(nodeData, path);
+#else
+            UpdateStatus("当前构建暂未集成系统文件选择器，请在 Unity Editor 中使用图片输入节点。");
+#endif
+        }
+
+        private void LoadImageIntoNode(NodeData nodeData, string path)
+        {
+            if (nodeData == null || string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            try
+            {
+                byte[] imageBytes = File.ReadAllBytes(path);
+                if (imageBytes == null || imageBytes.Length == 0)
+                {
+                    UpdateStatus("选中的图片为空。");
+                    return;
+                }
+
+                Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (!texture.LoadImage(imageBytes))
+                {
+                    Destroy(texture);
+                    UpdateStatus("无法读取选中的图片文件。");
+                    return;
+                }
+
+                if (nodeData.sourcePreviewImage != null)
+                {
+                    if (nodeData.sourcePreviewImage.texture != null)
+                    {
+                        Destroy(nodeData.sourcePreviewImage.texture);
+                    }
+
+                    nodeData.sourcePreviewImage.texture = texture;
+                }
+                else
+                {
+                    Destroy(texture);
+                }
+
+                Transform placeholder = nodeData.gameObject != null
+                    ? nodeData.gameObject.transform.Find("ImagePreviewArea/Placeholder")
+                    : null;
+                if (placeholder != null)
+                {
+                    placeholder.gameObject.SetActive(false);
+                }
+
+                nodeData.sourceImageData = imageBytes;
+                nodeData.selectedFilePath = path;
+                nodeData.sourceVersion++;
+                nodeData.cachedResult = null;
+
+                string fileName = Path.GetFileName(path);
+                UpdateImageInputStatus(nodeData, $"{fileName}\n{texture.width}x{texture.height}");
+
+                var needsReExecution = new HashSet<NodeData> { nodeData };
+                InvalidateDownstreamCache(nodeData, needsReExecution);
+                UpdateStatus($"Loaded image input: {fileName}");
+            }
+            catch (System.Exception e)
+            {
+                UpdateStatus($"加载图片失败: {e.Message}");
+            }
+        }
+
+        private void UpdateImageInputStatus(NodeData nodeData, string message)
+        {
+            if (nodeData?.sourceStatusLabel == null)
+            {
+                return;
+            }
+
+            nodeData.sourceStatusLabel.text = message;
         }
         
         private void OnPortClicked(NodeData nodeData, bool isInputPort, string portID)
@@ -1101,6 +1291,14 @@ namespace AIPipeline.UI
                         InvalidateDownstreamCache(node, needsReExecution);
                     }
                 }
+                else if (node.nodeType == "ImageInput")
+                {
+                    if (node.executedSourceVersion != node.sourceVersion)
+                    {
+                        needsReExecution.Add(node);
+                        InvalidateDownstreamCache(node, needsReExecution);
+                    }
+                }
                 
                 // Pre-populate nodeResults with cached data (for nodes not needing re-execution)
                 if (node.cachedResult != null && !needsReExecution.Contains(node))
@@ -1137,11 +1335,22 @@ namespace AIPipeline.UI
                         hasRoots = true;
                     }
                 }
+                else if (node.nodeType == "ImageInput")
+                {
+                    if (node.sourceImageData != null && node.sourceImageData.Length > 0)
+                    {
+                        nodeResults[node] = node.sourceImageData;
+                        node.cachedResult = node.sourceImageData;
+                        node.executedSourceVersion = node.sourceVersion;
+                        executionList.Add(node);
+                        hasRoots = true;
+                    }
+                }
             }
 
             if (!hasRoots)
             {
-                UpdateStatus("No TextInput nodes found or empty prompts!");
+                UpdateStatus("No TextInput/ImageInput nodes found or inputs are empty!");
                 yield break;
             }
 
@@ -1251,6 +1460,10 @@ namespace AIPipeline.UI
                              // Already put in nodeResults. Just pass.
                              outputData = nodeResults[currentNode];
                              break;
+
+                        case "ImageInput":
+                            outputData = currentNode.sourceImageData ?? currentNode.cachedResult;
+                            break;
 
                         case "Text2Image":
                             // Get input from connected
@@ -2078,10 +2291,17 @@ namespace AIPipeline.UI
         public RectTransform outputPort;
         public TMP_InputField inputField;
         public RawImage previewImage;     // Preview 节点的图片显示
+        public RawImage sourcePreviewImage;
+        public TextMeshProUGUI sourceStatusLabel;
+        public Button selectFileButton;
         public GameObject previewModel;   // Preview 节点的 3D 模型
         public Camera previewCamera;      // 预览相机
         public RenderTexture previewRT;   // 预览渲染纹理
         public byte[] cachedModelData;    // 缓存的模型数据用于放置到场景
+        public byte[] sourceImageData;
+        public string selectedFilePath;
+        public int sourceVersion;
+        public int executedSourceVersion = -1;
         public Button placeButton;        // "Place in Scene" 按钮
         public List<NodeData> connectedToNodes = new List<NodeData>(); // Output connections
         
