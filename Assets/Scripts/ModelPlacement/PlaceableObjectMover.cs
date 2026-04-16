@@ -566,8 +566,8 @@ namespace Morphis.ModelPlacement
             if (_activeHandle.Axis == AxisKind.PlaneXZ)
             {
                 Vector3 delta = pointOnPlane - _dragStartPlanePoint;
-                Vector3 targetPos = _dragStartPosition + new Vector3(delta.x, 0f, delta.z);
-                ApplyGroundAlignedMove(targetPos);
+                Vector3 planeTargetPos = _dragStartPosition + new Vector3(delta.x, 0f, delta.z);
+                ApplyGroundAlignedMove(planeTargetPos);
                 return;
             }
 
