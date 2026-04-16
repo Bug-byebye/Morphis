@@ -52,8 +52,6 @@ namespace Morphis.Friends
         private string _selectedUsername;
         private int _selectedRequestId = -1;
         private SelectedAction _selectedAction = SelectedAction.None;
-        private CursorLockMode _cursorLockBeforeOpen;
-        private bool _cursorVisibleBeforeOpen;
         private Coroutine _pollCoroutine;
         private Coroutine _toastCoroutine;
 
@@ -151,8 +149,6 @@ namespace Morphis.Friends
             _isOpen = true;
             _panel.SetActive(true);
             _toggleLabel.text = "关闭好友";
-            _cursorLockBeforeOpen = Cursor.lockState;
-            _cursorVisibleBeforeOpen = Cursor.visible;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             GameplayInputBlocker.SetBlocked(this, true);
@@ -173,12 +169,8 @@ namespace Morphis.Friends
             _toggleLabel.text = "好友(F)";
             HideSelectionCard();
             GameplayInputBlocker.SetBlocked(this, false);
-
-            if (!GameplayInputBlocker.IsBlocked)
-            {
-                Cursor.lockState = _cursorLockBeforeOpen;
-                Cursor.visible = _cursorVisibleBeforeOpen;
-            }
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
         }
 
         private IEnumerator PollLoop()

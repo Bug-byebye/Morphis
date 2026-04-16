@@ -49,23 +49,24 @@ namespace Morphis.ModelPlacement
 
         private void BuildUI()
         {
-            // Find or create canvas
-            _canvas = FindCanvas();
-            if (_canvas == null)
-            {
-                var canvasObj = new GameObject("ContextMenuCanvas");
-                _canvas = canvasObj.AddComponent<Canvas>();
-                _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                _canvas.sortingOrder = 150; // Higher than other UI
-                canvasObj.AddComponent<CanvasScaler>();
-                canvasObj.AddComponent<GraphicRaycaster>();
-            }
+            // Always use a dedicated canvas so other runtime UI scalers don't stretch the menu.
+            var canvasObj = new GameObject("ContextMenuCanvas");
+            canvasObj.transform.SetParent(transform, false);
+            _canvas = canvasObj.AddComponent<Canvas>();
+            _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            _canvas.sortingOrder = 210;
+
+            var scaler = canvasObj.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = 0.5f;
+            canvasObj.AddComponent<GraphicRaycaster>();
 
             // Create menu panel
             _menuPanel = new GameObject("ContextMenu");
             _menuPanel.transform.SetParent(_canvas.transform, false);
             _menuRect = _menuPanel.AddComponent<RectTransform>();
-            _menuRect.sizeDelta = new Vector2(200, 100);
+            _menuRect.sizeDelta = new Vector2(184f, 100f);
             _menuRect.pivot = new Vector2(0, 1); // Top-left pivot
 
             // Background
@@ -104,25 +105,13 @@ namespace Morphis.ModelPlacement
             _menuPanel.SetActive(false);
         }
 
-        private Canvas FindCanvas()
-        {
-            foreach (var c in FindObjectsOfType<Canvas>())
-            {
-                if (c.renderMode == RenderMode.ScreenSpaceOverlay && c.sortingOrder >= 100)
-                {
-                    return c;
-                }
-            }
-            return null;
-        }
-
         private GameObject CreateMenuButton(Transform parent, string text, Color color, Action onClick)
         {
             var btnObj = new GameObject($"Btn_{text}");
             btnObj.transform.SetParent(parent, false);
 
             var btnRect = btnObj.AddComponent<RectTransform>();
-            btnRect.sizeDelta = new Vector2(0, 36);
+            btnRect.sizeDelta = new Vector2(0, 34f);
 
             var btnImg = btnObj.AddComponent<Image>();
             btnImg.color = color;
@@ -133,8 +122,8 @@ namespace Morphis.ModelPlacement
 
             // Add layout element
             var layoutElem = btnObj.AddComponent<LayoutElement>();
-            layoutElem.preferredHeight = 36;
-            layoutElem.minHeight = 36;
+            layoutElem.preferredHeight = 34f;
+            layoutElem.minHeight = 34f;
 
             // Button text
             var textObj = new GameObject("Text");
@@ -147,7 +136,7 @@ namespace Morphis.ModelPlacement
 
             var tmp = textObj.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
-            tmp.fontSize = 14;
+            tmp.fontSize = 13f;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
@@ -189,12 +178,12 @@ namespace Morphis.ModelPlacement
             if (_deleteBtn != null) _deleteBtn.SetActive(onDeleteSelected != null);
             
             // Adjust height based on active buttons
-            float height = 16; // Padding
-            if (onMoveSelected != null) height += 36 + 6;
-            if (onRotateSelected != null) height += 36 + 6;
-            if (onScaleSelected != null) height += 36 + 6;
-            if (onMessageSelected != null) height += 36 + 6;
-            if (onDeleteSelected != null) height += 36 + 6;
+            float height = 16f; // Padding
+            if (onMoveSelected != null) height += 34f + 6f;
+            if (onRotateSelected != null) height += 34f + 6f;
+            if (onScaleSelected != null) height += 34f + 6f;
+            if (onMessageSelected != null) height += 34f + 6f;
+            if (onDeleteSelected != null) height += 34f + 6f;
             _menuRect.sizeDelta = new Vector2(_menuRect.sizeDelta.x, height);
 
             // Force layout rebuild so sizeDelta is accurate immediately

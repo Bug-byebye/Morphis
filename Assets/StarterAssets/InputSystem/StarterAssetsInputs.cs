@@ -21,6 +21,12 @@ namespace StarterAssets
 		public bool cursorLocked = false;
 		public bool cursorInputForLook = true;
 
+		private void Awake()
+		{
+			cursorLocked = false;
+			EnsureCursorVisible();
+		}
+
 #if ENABLE_INPUT_SYSTEM
 		// For Send Messages mode
 		public void OnMove(InputValue value)
@@ -114,6 +120,7 @@ namespace StarterAssets
 
 		private void Update()
 		{
+			EnsureCursorVisible();
 			if (!GameplayInputBlocker.IsBlocked) return;
 			move = Vector2.zero;
 			look = Vector2.zero;
@@ -123,12 +130,26 @@ namespace StarterAssets
 
 		private void OnApplicationFocus(bool hasFocus)
 		{
-			SetCursorState(cursorLocked);
+			SetCursorState(false);
 		}
 
 		private void SetCursorState(bool newState)
 		{
-			Cursor.lockState = newState ? CursorLockMode.Locked : CursorLockMode.None;
+			cursorLocked = false;
+			EnsureCursorVisible();
+		}
+
+		private static void EnsureCursorVisible()
+		{
+			if (Cursor.lockState != CursorLockMode.None)
+			{
+				Cursor.lockState = CursorLockMode.None;
+			}
+
+			if (!Cursor.visible)
+			{
+				Cursor.visible = true;
+			}
 		}
 	}
 	
