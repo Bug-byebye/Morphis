@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using TMPro;
 using System;
 using Morphis.InputControl;
@@ -16,6 +17,8 @@ namespace Morphis.ModelPlacement
 
         [Header("UI References")]
         private Canvas _canvas;
+        private RectTransform _canvasRect;
+        private GraphicRaycaster _raycaster;
         private GameObject _menuPanel;
         private RectTransform _menuRect;
         
@@ -33,6 +36,7 @@ namespace Morphis.ModelPlacement
         private Action _onScaleSelected;
         private Action _onMessageSelected;
         private Action _onDeleteSelected;
+        private int _lastShownFrame = -1;
 
         private void Awake()
         {
@@ -55,17 +59,20 @@ namespace Morphis.ModelPlacement
             _canvas = canvasObj.AddComponent<Canvas>();
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             _canvas.sortingOrder = 210;
+            _canvasRect = canvasObj.GetComponent<RectTransform>();
 
             var scaler = canvasObj.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.matchWidthOrHeight = 0.5f;
-            canvasObj.AddComponent<GraphicRaycaster>();
+            _raycaster = canvasObj.AddComponent<GraphicRaycaster>();
 
             // Create menu panel
             _menuPanel = new GameObject("ContextMenu");
             _menuPanel.transform.SetParent(_canvas.transform, false);
             _menuRect = _menuPanel.AddComponent<RectTransform>();
+            _menuRect.anchorMin = new Vector2(0.5f, 0.5f);
+            _menuRect.anchorMax = new Vector2(0.5f, 0.5f);
             _menuRect.sizeDelta = new Vector2(184f, 100f);
             _menuRect.pivot = new Vector2(0, 1); // Top-left pivot
 
@@ -102,6 +109,7 @@ namespace Morphis.ModelPlacement
             // Delete button
             _deleteBtn = CreateMenuButton(_menuPanel.transform, "删除物体", new Color(0.8f, 0.25f, 0.25f), OnDeleteClicked);
 
+            SetUiLayerRecursive(canvasObj, GetUiLayer());
             _menuPanel.SetActive(false);
         }
 
@@ -186,21 +194,12 @@ namespace Morphis.ModelPlacement
             if (onDeleteSelected != null) height += 34f + 6f;
             _menuRect.sizeDelta = new Vector2(_menuRect.sizeDelta.x, height);
 
-            // Force layout rebuild so sizeDelta is accurate immediately
+            _menuPanel.SetActive(true);
+            Canvas.ForceUpdateCanvases();
             LayoutRebuilder.ForceRebuildLayoutImmediate(_menuRect);
 
-            // Position menu at mouse
-            Vector2 mousePos = GetMousePosition();
-            
-            // Adjust position so the top-left pivot starts exactly at the mouse pointer
-            // We use RectTransformUtility to convert screen point to local point if needed,
-            // but since canvas is overlay, raw screen position works directly.
-            _menuRect.position = mousePos;
-
-            // Ensure menu stays on screen after layout rebuild
-            ClampMenuToScreen();
-
-            _menuPanel.SetActive(true);
+            PositionMenuAtScreenPoint(GetMousePosition());
+            _lastShownFrame = Time.frameCount;
             GameplayInputBlocker.SetBlocked(this, true);
             Debug.Log($"[ContextMenu] Showing menu for {target.name}");
         }
@@ -267,33 +266,98 @@ namespace Morphis.ModelPlacement
             return Input.mousePosition;
         }
 
-        private void ClampMenuToScreen()
+        private void PositionMenuAtScreenPoint(Vector2 screenPoint)
         {
-            // Get screen bounds
-            var screenWidth = Screen.width;
-            var screenHeight = Screen.height;
+            if (_canvasRect == null)
+            {
+                _menuRect.position = screenPoint;
+                ClampMenuToCanvas();
+                return;
+            }
 
-            var pos = _menuRect.position;
-            
-            // Give RectTransform a layout pass if size is 0
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                _canvasRect,
+                screenPoint,
+                _canvas.worldCamera,
+                out var localPoint
+            );
+            _menuRect.anchoredPosition = localPoint;
+            ClampMenuToCanvas();
+        }
+
+        private void ClampMenuToCanvas()
+        {
             if (_menuRect.rect.width == 0 || _menuRect.rect.height == 0)
             {
                 LayoutRebuilder.ForceRebuildLayoutImmediate(_menuRect);
             }
-            
-            var size = new Vector2(_menuRect.rect.width, _menuRect.rect.height);
 
-            // Clamp to screen
-            if (pos.x + size.x > screenWidth)
+            if (_canvasRect == null)
             {
-                pos.x = screenWidth - size.x;
-            }
-            if (pos.y - size.y < 0)
-            {
-                pos.y = size.y;
+                return;
             }
 
-            _menuRect.position = pos;
+            var canvasBounds = _canvasRect.rect;
+            var size = _menuRect.rect.size;
+            var pos = _menuRect.anchoredPosition;
+
+            float minX = canvasBounds.xMin;
+            float maxX = canvasBounds.xMax - size.x;
+            float minY = canvasBounds.yMin + size.y;
+            float maxY = canvasBounds.yMax;
+
+            pos.x = Mathf.Clamp(pos.x, minX, maxX);
+            pos.y = Mathf.Clamp(pos.y, minY, maxY);
+            _menuRect.anchoredPosition = pos;
+        }
+
+        private bool IsPointerOverMenu(Vector2 screenPoint)
+        {
+            if (_raycaster != null && EventSystem.current != null)
+            {
+                var pointerData = new PointerEventData(EventSystem.current)
+                {
+                    position = screenPoint
+                };
+
+                var results = new System.Collections.Generic.List<RaycastResult>();
+                _raycaster.Raycast(pointerData, results);
+                foreach (var result in results)
+                {
+                    if (result.gameObject == null)
+                    {
+                        continue;
+                    }
+
+                    var hitTransform = result.gameObject.transform;
+                    if (hitTransform == _menuPanel.transform || hitTransform.IsChildOf(_menuPanel.transform))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return RectTransformUtility.RectangleContainsScreenPoint(_menuRect, screenPoint, _canvas.worldCamera);
+        }
+
+        private static int GetUiLayer()
+        {
+            int uiLayer = LayerMask.NameToLayer("UI");
+            return uiLayer >= 0 ? uiLayer : 5;
+        }
+
+        private static void SetUiLayerRecursive(GameObject obj, int layer)
+        {
+            if (obj == null)
+            {
+                return;
+            }
+
+            obj.layer = layer;
+            foreach (Transform child in obj.transform)
+            {
+                SetUiLayerRecursive(child.gameObject, layer);
+            }
         }
 
         private void Update()
@@ -304,6 +368,11 @@ namespace Morphis.ModelPlacement
             // Close menu if clicking elsewhere
             if (_menuPanel.activeSelf)
             {
+                if (Time.frameCount == _lastShownFrame)
+                {
+                    return;
+                }
+
                 bool clicked = Input.GetMouseButtonDown(0) || 
                               (UnityEngine.InputSystem.Mouse.current?.leftButton.wasPressedThisFrame ?? false);
 
@@ -311,7 +380,7 @@ namespace Morphis.ModelPlacement
                 {
                     // Check if click is outside menu
                     Vector2 mousePos = GetMousePosition();
-                    if (!RectTransformUtility.RectangleContainsScreenPoint(_menuRect, mousePos, _canvas.worldCamera))
+                    if (!IsPointerOverMenu(mousePos))
                     {
                         HideMenu();
                     }

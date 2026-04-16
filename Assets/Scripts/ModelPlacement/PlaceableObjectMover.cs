@@ -67,24 +67,10 @@ namespace Morphis.ModelPlacement
             if (_cam == null) _cam = Camera.main;
             if (_cam == null) return;
 
-            // Block interaction ONLY if strictly over UI elements (Layer: UI)
-            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            // Block world interaction while the pointer is over any screen UI.
+            if (IsPointerOverUi())
             {
-                var pointerData = new PointerEventData(EventSystem.current) { position = Input.mousePosition };
-                var results = new System.Collections.Generic.List<RaycastResult>();
-                EventSystem.current.RaycastAll(pointerData, results);
-                
-                bool blockedByUI = false;
-                foreach (var result in results)
-                {
-                    if (result.gameObject.layer == 5) // UI layer
-                    {
-                        blockedByUI = true;
-                        break;
-                    }
-                }
-                
-                if (blockedByUI) return;
+                return;
             }
 
             // Waiting for the user to release the mouse after clicking a menu button
@@ -156,6 +142,39 @@ namespace Morphis.ModelPlacement
                     );
                 }
             }
+        }
+
+        private bool IsPointerOverUi()
+        {
+            if (EventSystem.current == null)
+            {
+                return false;
+            }
+
+            Vector2 mousePos = Input.mousePosition;
+            if (UnityEngine.InputSystem.Mouse.current != null)
+            {
+                mousePos = UnityEngine.InputSystem.Mouse.current.position.ReadValue();
+            }
+
+            var pointerData = new PointerEventData(EventSystem.current) { position = mousePos };
+            var results = new System.Collections.Generic.List<RaycastResult>();
+            EventSystem.current.RaycastAll(pointerData, results);
+
+            foreach (var result in results)
+            {
+                if (result.gameObject == null)
+                {
+                    continue;
+                }
+
+                if (result.gameObject.GetComponentInParent<Canvas>() != null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public void EnterMoveMode()
