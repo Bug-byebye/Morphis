@@ -671,7 +671,7 @@ namespace Morphis.Friends
 
         private void CreateToggleButton(Transform parent)
         {
-            _toggleButtonObject = CreatePanelObject(parent, "FriendToggleButton", new Vector2(156f, 54f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(26f, 0f), new Color(0.18f, 0.47f, 0.79f, 0.95f));
+            _toggleButtonObject = CreatePanelObject(parent, "FriendToggleButton", new Vector2(156f, 54f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(26f, 34f), new Color(0.18f, 0.47f, 0.79f, 0.95f));
             _toggleButton = _toggleButtonObject.AddComponent<Button>();
             _toggleButton.onClick.AddListener(TogglePanel);
             _toggleLabel = CreateTextChild(_toggleButtonObject, "Label", "好友(F)", 22f, TextAlignmentOptions.Center);

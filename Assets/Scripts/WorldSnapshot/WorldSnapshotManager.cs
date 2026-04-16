@@ -26,6 +26,7 @@ namespace Morphis.WorldSnapshot
         [SerializeField] private bool autoLoadOnStart = true;
 
         private HttpWorldService _httpService;
+        private Coroutine _pendingAutosaveCoroutine;
         /// <summary> 当前会话使用的世界 ID：来自 AppSession.WorkspaceId（选中的空间）或 defaultWorldId </summary>
         private string _currentWorldId;
 
@@ -66,6 +67,11 @@ namespace Morphis.WorldSnapshot
         private void OnDestroy()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            if (_pendingAutosaveCoroutine != null)
+            {
+                StopCoroutine(_pendingAutosaveCoroutine);
+                _pendingAutosaveCoroutine = null;
+            }
             if (Instance == this)
             {
                 Instance = null;
@@ -211,6 +217,54 @@ namespace Morphis.WorldSnapshot
             // 单机/离线保持原逻辑
             var snapshot = WorldSnapshotBuilder.BuildSnapshot(worldId);
             EnsureHttpService().SaveToServer(snapshot, onSuccess, onError);
+        }
+
+        /// <summary>
+        /// 请求一次自动保存；短时间内重复调用会被合并，避免连续编辑触发大量保存请求。
+        /// </summary>
+        public void RequestAutosave(float delaySeconds = 0.75f)
+        {
+            if (!AppSession.IsLoggedIn)
+                return;
+
+            if (_pendingAutosaveCoroutine != null)
+            {
+                StopCoroutine(_pendingAutosaveCoroutine);
+            }
+
+            _pendingAutosaveCoroutine = StartCoroutine(AutosaveAfterDelay(Mathf.Max(0f, delaySeconds)));
+        }
+
+        /// <summary>
+        /// 立即执行一次保存，并清空尚未触发的自动保存。
+        /// </summary>
+        public void FlushAutosave()
+        {
+            if (!AppSession.IsLoggedIn)
+                return;
+
+            if (_pendingAutosaveCoroutine != null)
+            {
+                StopCoroutine(_pendingAutosaveCoroutine);
+                _pendingAutosaveCoroutine = null;
+            }
+
+            SaveWorldServer(
+                onError: err => Debug.LogWarning($"[WorldSnapshotManager] Flush autosave failed: {err}")
+            );
+        }
+
+        private System.Collections.IEnumerator AutosaveAfterDelay(float delaySeconds)
+        {
+            if (delaySeconds > 0f)
+            {
+                yield return new WaitForSeconds(delaySeconds);
+            }
+
+            _pendingAutosaveCoroutine = null;
+            SaveWorldServer(
+                onError: err => Debug.LogWarning($"[WorldSnapshotManager] Autosave failed: {err}")
+            );
         }
 
         /// <summary>

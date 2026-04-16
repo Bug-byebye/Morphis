@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Mirror;
@@ -28,11 +29,14 @@ namespace StarterAssets
         private static string _serverWorldId;
         private static int _serverWorldVersion = 1;
         private static readonly Dictionary<string, WorldObjectData> _serverObjects = new Dictionary<string, WorldObjectData>();
+        private const float ServerAutosaveDelaySeconds = 0.8f;
 
         // =========================
         // Client object cache
         // =========================
         private static readonly Dictionary<string, GameObject> _clientObjects = new Dictionary<string, GameObject>();
+        private static Coroutine _serverAutosaveCoroutine;
+        private static HttpWorldService _serverAutosaveHost;
 
         public static NetworkPlayerSetup Local { get; private set; }
 
@@ -392,6 +396,7 @@ namespace StarterAssets
 
             // 广播生成
             RpcSpawnWorldObject(data.object_id, data.prefab_id, data.position, data.rotation, data.scale, data.comment ?? "");
+            ScheduleServerAutosave("place");
         }
 
         [Command]
@@ -406,6 +411,7 @@ namespace StarterAssets
             _serverWorldVersion++;
 
             RpcUpdateWorldObject(objectId, position, rotation, scale);
+            ScheduleServerAutosave("move");
         }
 
         [Command]
@@ -415,6 +421,7 @@ namespace StarterAssets
             if (!_serverObjects.Remove(objectId)) return;
             _serverWorldVersion++;
             RpcDestroyWorldObject(objectId);
+            ScheduleServerAutosave("delete");
         }
 
         [Command]
@@ -466,6 +473,44 @@ namespace StarterAssets
             _serverWorldVersion++;
 
             RpcSetComment(objectId, comment ?? string.Empty);
+            ScheduleServerAutosave("comment");
+        }
+
+        private void ScheduleServerAutosave(string reason)
+        {
+            if (!isServer)
+            {
+                return;
+            }
+
+            _serverAutosaveHost = HttpWorldService.GetOrCreate();
+            if (_serverAutosaveHost == null)
+            {
+                Debug.LogWarning("[WorldAuthority] Autosave host is unavailable.");
+                return;
+            }
+
+            if (_serverAutosaveCoroutine != null)
+            {
+                _serverAutosaveHost.StopCoroutine(_serverAutosaveCoroutine);
+            }
+
+            _serverAutosaveCoroutine = _serverAutosaveHost.StartCoroutine(ServerAutosaveAfterDelay(reason));
+        }
+
+        private static IEnumerator ServerAutosaveAfterDelay(string reason)
+        {
+            yield return new WaitForSeconds(ServerAutosaveDelaySeconds);
+            _serverAutosaveCoroutine = null;
+
+            EnsureServerWorldId();
+            var snapshot = BuildSnapshotFromAuthority();
+            var http = HttpWorldService.GetOrCreate();
+            http.SaveToServer(
+                snapshot,
+                onSuccess: () => Debug.Log($"[WorldAuthority] Autosaved world '{snapshot.world_id}' after {reason} (v{snapshot.version})"),
+                onError: err => Debug.LogWarning($"[WorldAuthority] Autosave after {reason} failed: {err}")
+            );
         }
 
         // =========================

@@ -10,7 +10,7 @@ namespace Morphis.Friends
     /// </summary>
     public class PlayerNameTag : MonoBehaviour
     {
-        private static readonly Vector3 WorldOffset = new Vector3(0f, 0.6f, 0f);
+        private static readonly Vector3 WorldOffset = new Vector3(0f, 0.55f, 0f);
 
         private NetworkPlayerSetup _owner;
         private Transform _anchor;
@@ -98,8 +98,8 @@ namespace Morphis.Friends
             canvasObj.transform.SetParent(transform, false);
 
             _canvasRect = canvasObj.AddComponent<RectTransform>();
-            _canvasRect.sizeDelta = new Vector2(240f, 56f);
-            _canvasRect.localScale = Vector3.one * 0.01f;
+            _canvasRect.sizeDelta = new Vector2(180f, 30f);
+            _canvasRect.localScale = Vector3.one * 0.0085f;
 
             var canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
@@ -109,30 +109,23 @@ namespace Morphis.Friends
             canvasObj.AddComponent<CanvasScaler>().dynamicPixelsPerUnit = 16f;
             canvasObj.AddComponent<GraphicRaycaster>().enabled = false;
 
-            var backgroundObj = new GameObject("Background");
-            backgroundObj.transform.SetParent(canvasObj.transform, false);
-            var bgRect = backgroundObj.AddComponent<RectTransform>();
-            bgRect.anchorMin = Vector2.zero;
-            bgRect.anchorMax = Vector2.one;
-            bgRect.offsetMin = Vector2.zero;
-            bgRect.offsetMax = Vector2.zero;
-
-            var background = backgroundObj.AddComponent<Image>();
-            background.color = new Color(0.05f, 0.07f, 0.11f, 0.72f);
-
             var textObj = new GameObject("Label");
-            textObj.transform.SetParent(backgroundObj.transform, false);
+            textObj.transform.SetParent(canvasObj.transform, false);
             var textRect = textObj.AddComponent<RectTransform>();
             textRect.anchorMin = Vector2.zero;
             textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = new Vector2(12f, 6f);
-            textRect.offsetMax = new Vector2(-12f, -6f);
+            textRect.offsetMin = new Vector2(4f, 0f);
+            textRect.offsetMax = new Vector2(-4f, 0f);
 
             _label = textObj.AddComponent<TextMeshProUGUI>();
-            _label.fontSize = 26f;
+            _label.enableAutoSizing = true;
+            _label.fontSizeMax = 18f;
+            _label.fontSizeMin = 12f;
             _label.alignment = TextAlignmentOptions.Center;
             _label.enableWordWrapping = false;
+            _label.overflowMode = TextOverflowModes.Ellipsis;
             _label.color = Color.white;
+            _label.raycastTarget = false;
             _label.text = "玩家";
         }
     }

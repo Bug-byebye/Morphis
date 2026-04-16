@@ -63,8 +63,8 @@ namespace Morphis.ModelPlacement
             btnRt.anchorMin = new Vector2(0, 0.5f);
             btnRt.anchorMax = new Vector2(0, 0.5f);
             btnRt.pivot = new Vector2(0, 0.5f);
-            btnRt.sizeDelta = new Vector2(110, 44);
-            btnRt.anchoredPosition = new Vector2(16, 0);
+            btnRt.sizeDelta = new Vector2(118, 44);
+            btnRt.anchoredPosition = new Vector2(26, -34f);
             _toggleBtn.onClick.AddListener(TogglePanel);
 
             // Panel
