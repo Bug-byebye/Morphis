@@ -7,6 +7,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Morphis.AppFlow;
 using Morphis.InputControl;
+using AIPipeline.UI;
 
 namespace Morphis.Chat
 {
@@ -169,7 +170,9 @@ namespace Morphis.Chat
                 return false;
             }
 
-            return AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId);
+            return !SimpleNodeEditor.IsEditorOpen &&
+                   AppSession.IsLoggedIn &&
+                   !string.IsNullOrEmpty(AppSession.WorkspaceId);
         }
 
         private void SendMessage()

@@ -9,6 +9,7 @@ using Mirror;
 using Morphis.AppFlow;
 using Morphis.InputControl;
 using StarterAssets;
+using AIPipeline.UI;
 
 namespace Morphis.Friends
 {
@@ -130,7 +131,10 @@ namespace Morphis.Friends
 
         private bool CanUseFriendUi()
         {
-            return !Application.isBatchMode && AppSession.IsLoggedIn && NetworkClient.active;
+            return !Application.isBatchMode &&
+                   !SimpleNodeEditor.IsEditorOpen &&
+                   AppSession.IsLoggedIn &&
+                   NetworkClient.active;
         }
 
         private void TogglePanel()
@@ -608,6 +612,8 @@ namespace Morphis.Friends
 
             if (!visible)
             {
+                HideSelectionCard();
+                HideToastImmediate();
                 ClosePanel();
             }
         }
@@ -671,7 +677,7 @@ namespace Morphis.Friends
 
         private void CreatePanel(Transform parent)
         {
-            _panel = CreatePanelObject(parent, "FriendPanel", new Vector2(400f, 660f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(24f, 0f), new Color(0.08f, 0.09f, 0.12f, 0.98f));
+            _panel = CreatePanelObject(parent, "FriendPanel", new Vector2(400f, 660f), new Vector2(0.26f, 0.5f), new Vector2(0.26f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Color(0.08f, 0.09f, 0.12f, 0.98f));
 
             var header = CreatePanelObject(_panel.transform, "Header", new Vector2(0f, 68f), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, 0f), new Color(0.14f, 0.16f, 0.2f, 1f));
             var headerRect = header.GetComponent<RectTransform>();

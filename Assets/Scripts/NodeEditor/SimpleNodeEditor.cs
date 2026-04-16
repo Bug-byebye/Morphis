@@ -188,7 +188,7 @@ namespace AIPipeline.UI
             rt.anchorMax = new Vector2(1, 1);
             rt.pivot = new Vector2(1, 1);
             rt.anchoredPosition = new Vector2(-20, -20);
-            rt.sizeDelta = new Vector2(160, 40);
+            rt.sizeDelta = new Vector2(170, 54);
 
             // Button Text
             GameObject txtObj = new GameObject("Text");
@@ -196,7 +196,7 @@ namespace AIPipeline.UI
             
             TextMeshProUGUI txt = txtObj.AddComponent<TextMeshProUGUI>();
             txt.text = "工作台";
-            txt.fontSize = 18;
+            txt.fontSize = 22;
             txt.alignment = TextAlignmentOptions.Center;
             txt.color = Color.white;
             workflowStationButtonText = txt;

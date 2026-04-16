@@ -10,6 +10,7 @@ using Morphis.WorldSnapshot;
 using Morphis.Companion;
 using Mirror;
 using StarterAssets;
+using AIPipeline.UI;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -37,6 +38,7 @@ namespace Morphis.ModelPlacement
         private Button _toggleBtn;
         private Button _closeBtn;
         private Transform _listRoot;
+        private bool _uiVisible = true;
 
         private Camera _cam;
         private readonly List<PlaceableDefinition> _items = new();
@@ -47,6 +49,7 @@ namespace Morphis.ModelPlacement
             BuildUI();
             LoadPlaceables();
             RebuildList();
+            RefreshUiVisibility();
         }
 
         private void BuildUI()
@@ -192,6 +195,13 @@ namespace Morphis.ModelPlacement
 
         private void Update()
         {
+            RefreshUiVisibility();
+
+            if (!_uiVisible)
+            {
+                return;
+            }
+
             // 按下 Esc 关闭面板（如果当前已打开）
             if (_panel != null && _panel.gameObject.activeSelf)
             {
@@ -199,6 +209,27 @@ namespace Morphis.ModelPlacement
                 {
                     SetPanelVisible(false);
                 }
+            }
+        }
+
+        private void RefreshUiVisibility()
+        {
+            bool shouldShow = !SimpleNodeEditor.IsEditorOpen;
+            if (shouldShow == _uiVisible)
+            {
+                return;
+            }
+
+            _uiVisible = shouldShow;
+
+            if (_toggleBtn != null)
+            {
+                _toggleBtn.gameObject.SetActive(_uiVisible);
+            }
+
+            if (!_uiVisible)
+            {
+                SetPanelVisible(false);
             }
         }
 
@@ -717,7 +748,7 @@ namespace Morphis.ModelPlacement
 
             var tmp = label.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
-            tmp.fontSize = 16;
+            tmp.fontSize = 22;
             tmp.fontStyle = FontStyles.Bold;
             tmp.color = Color.white;
             tmp.alignment = TextAlignmentOptions.Center;
