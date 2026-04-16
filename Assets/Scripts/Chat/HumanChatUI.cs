@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using Morphis.AppFlow;
 using Morphis.InputControl;
 
 namespace Morphis.Chat
@@ -35,6 +37,7 @@ namespace Morphis.Chat
         private Button toggleButton;
         private TextMeshProUGUI toggleButtonText;
         private bool isOpen;
+        private bool isAvailable;
         private Coroutine panelAnimationCoroutine;
         private Vector2 panelShownPosition;
         private Vector2 panelHiddenPosition;
@@ -48,10 +51,14 @@ namespace Morphis.Chat
             if (chatPanelCanvasGroup != null) chatPanelCanvasGroup.alpha = 0f;
             chatPanel.SetActive(false);
             UpdateToggleButtonLabel();
+            RefreshAvailability();
         }
 
         private void Update()
         {
+            RefreshAvailability();
+            if (!isAvailable) return;
+
             if (!isOpen) return;
 
             if (Input.GetKeyDown(KeyCode.Return) && !string.IsNullOrWhiteSpace(inputField.text))
@@ -73,7 +80,7 @@ namespace Morphis.Chat
 
         public void Open()
         {
-            if (isOpen) return;
+            if (isOpen || !isAvailable) return;
 
             isOpen = true;
             if (!chatPanel.activeSelf)
@@ -113,6 +120,56 @@ namespace Morphis.Chat
         {
             StopPanelAnimation();
             GameplayInputBlocker.SetBlocked(this, false);
+        }
+
+        private void RefreshAvailability()
+        {
+            bool shouldBeAvailable = CanUseHumanChatUi();
+            if (shouldBeAvailable == isAvailable)
+            {
+                return;
+            }
+
+            isAvailable = shouldBeAvailable;
+
+            if (toggleButton != null)
+            {
+                toggleButton.gameObject.SetActive(isAvailable);
+            }
+
+            if (!isAvailable)
+            {
+                if (isOpen)
+                {
+                    isOpen = false;
+                    StopPanelAnimation();
+                }
+
+                if (chatPanel != null)
+                {
+                    chatPanel.SetActive(false);
+                }
+
+                GameplayInputBlocker.SetBlocked(this, false);
+            }
+
+            UpdateToggleButtonLabel();
+        }
+
+        private static bool CanUseHumanChatUi()
+        {
+            if (Application.isBatchMode)
+            {
+                return false;
+            }
+
+            var sceneName = SceneManager.GetActiveScene().name;
+            if (string.Equals(sceneName, "BootScene", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return AppSession.IsLoggedIn && !string.IsNullOrEmpty(AppSession.WorkspaceId);
         }
 
         private void SendMessage()
