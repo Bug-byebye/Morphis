@@ -204,6 +204,14 @@ namespace Morphis.ModelPlacement
 
         private void TryPlace()
         {
+            float targetGroundHeight = ModelLibraryUI.ResolveGroundHeightAt(
+                transform.position,
+                transform.position.y,
+                transform);
+            ModelLibraryUI.SnapToGround(gameObject, targetGroundHeight);
+            _pendingTargetPos = transform.position;
+            _pendingGroundHeight = targetGroundHeight;
+
             _currentMode = EditMode.None;
             _dragging = false;
             SetCollidersEnabled(true);
@@ -344,6 +352,7 @@ namespace Morphis.ModelPlacement
             {
                 // Align center to cursor (no offset)
                 var targetPos = groundPoint;
+                bool clampedToRadius = false;
 
                 // Restrict to Player Radius
                 if (_playerTransform != null)
@@ -361,21 +370,20 @@ namespace Morphis.ModelPlacement
                         Vector3 clampedPlane = plyPosPlane + dir * maxMoveRadius;
                         targetPos.x = clampedPlane.x;
                         targetPos.z = clampedPlane.z;
-                        // Y remains from ground point
+                        clampedToRadius = true;
                     }
                 }
 
-                _pendingTargetPos = targetPos;
-                _pendingGroundHeight = groundHeight;
-
-                // 联机模式：不直接改 Transform（避免客户端直改世界对象）
-                if (NetworkClient.active)
+                if (clampedToRadius)
                 {
-                    return;
+                    groundHeight = ModelLibraryUI.ResolveGroundHeightAt(targetPos, groundHeight, transform);
                 }
 
+                targetPos.y = groundHeight;
                 transform.position = targetPos;
                 ModelLibraryUI.SnapToGround(gameObject, groundHeight);
+                _pendingTargetPos = transform.position;
+                _pendingGroundHeight = groundHeight;
             }
         }
 
@@ -386,8 +394,8 @@ namespace Morphis.ModelPlacement
             
             var ray = _cam.ScreenPointToRay(Input.mousePosition);
 
-            // 1. Try hitting environment
-            if (Physics.Raycast(ray, out var hit, 1000f, ~0, QueryTriggerInteraction.Ignore))
+            // 1. Prefer environment hits while skipping self / player / other movable objects.
+            if (ModelLibraryUI.TryGetPlacementHit(ray, out var hit, transform))
             {
                 point = hit.point;
                 height = hit.point.y;

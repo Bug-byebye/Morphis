@@ -7,6 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using GLTFast;
 using Morphis.WorldSnapshot;
+using Morphis.Companion;
 using Mirror;
 using StarterAssets;
 #if UNITY_EDITOR
@@ -21,6 +22,10 @@ namespace Morphis.ModelPlacement
     /// </summary>
     public class ModelLibraryUI : MonoBehaviour
     {
+        private const float DefaultPlacementSize = 1.0f;
+        private const float DownwardProbeHeight = 256f;
+        private const float DownwardProbeDistance = 1024f;
+
         [Header("Resources")]
         [SerializeField] private string resourcesPath = "Placeables";
 
@@ -325,17 +330,36 @@ namespace Morphis.ModelPlacement
 
                 if (def.Prefab != null)
                 {
-                    return NetworkPlayerSetup.Local.RequestPlace($"{resourcesPath}/{def.DisplayName}", worldPos, Quaternion.identity, Vector3.one);
+                    var probe = Instantiate(def.Prefab);
+                    if (!TryComputePlacementTransform(probe, worldPos, targetBaseY, DefaultPlacementSize, out var finalPosition, out var finalScale))
+                    {
+                        Destroy(probe);
+                        return false;
+                    }
+
+                    Destroy(probe);
+                    return NetworkPlayerSetup.Local.RequestPlace($"{resourcesPath}/{def.DisplayName}", finalPosition, Quaternion.identity, finalScale);
                 }
 
                 if (def.GlbAsset != null)
                 {
-                    // 约定：glb:<name>，客户端通过 Resources/Placeables/<name> 加载
-                    return NetworkPlayerSetup.Local.RequestPlace($"glb:{def.DisplayName}", worldPos, Quaternion.identity, Vector3.one);
+                    StartCoroutine(RequestNetworkGlbPlacement(def.GlbAsset, def.DisplayName, worldPos, targetBaseY));
+                    return true;
                 }
 
                 // primitive
-                return NetworkPlayerSetup.Local.RequestPlace($"primitive:{def.FallbackPrimitive}", worldPos, Quaternion.identity, Vector3.one);
+                {
+                    var probe = GameObject.CreatePrimitive(def.FallbackPrimitive);
+                    probe.name = def.DisplayName;
+                    if (!TryComputePlacementTransform(probe, worldPos, targetBaseY, DefaultPlacementSize, out var finalPosition, out var finalScale))
+                    {
+                        Destroy(probe);
+                        return false;
+                    }
+
+                    Destroy(probe);
+                    return NetworkPlayerSetup.Local.RequestPlace($"primitive:{def.FallbackPrimitive}", finalPosition, Quaternion.identity, finalScale);
+                }
             }
 
             // 1) Prefab
@@ -343,7 +367,7 @@ namespace Morphis.ModelPlacement
             {
                 var go = Instantiate(def.Prefab, worldPos, Quaternion.identity);
                 EnsureColliderFromRenderers(go);
-                NormalizeScale(go, targetSize: 1.0f);
+                NormalizeScale(go, targetSize: DefaultPlacementSize);
                 SnapToGround(go, targetBaseY);
                 EnsurePlaceableComponents(go);
                 EnsureWorldObjectForSnapshot(go, $"{resourcesPath}/{def.DisplayName}");
@@ -364,13 +388,54 @@ namespace Morphis.ModelPlacement
                 var go = GameObject.CreatePrimitive(def.FallbackPrimitive);
                 go.name = def.DisplayName;
                 go.transform.position = worldPos;
-                NormalizeScale(go, targetSize: 1.0f);
+                NormalizeScale(go, targetSize: DefaultPlacementSize);
                 SnapToGround(go, targetBaseY);
                 EnsurePlaceableComponents(go);
                 EnsureWorldObjectForSnapshot(go, $"primitive:{def.FallbackPrimitive}");
                 Debug.Log($"[ModelLibrary] Placed primitive: {def.DisplayName} at {worldPos}");
                 return true;
             }
+        }
+
+        private IEnumerator RequestNetworkGlbPlacement(TextAsset glb, string displayName, Vector3 worldPos, float targetBaseY)
+        {
+            if (glb == null)
+            {
+                yield break;
+            }
+
+            var root = new GameObject($"PlacementProbe_{displayName}");
+            root.hideFlags = HideFlags.HideAndDontSave;
+            root.transform.position = worldPos;
+
+            var gltf = new GltfImport();
+            var loadTask = gltf.LoadGltfBinary(glb.bytes);
+            while (!loadTask.IsCompleted) yield return null;
+            if (!loadTask.Result)
+            {
+                Debug.LogError($"[ModelLibrary] Failed to load GLB probe: {displayName}");
+                Destroy(root);
+                yield break;
+            }
+
+            var instTask = gltf.InstantiateMainSceneAsync(root.transform);
+            while (!instTask.IsCompleted) yield return null;
+            if (!instTask.Result)
+            {
+                Debug.LogError($"[ModelLibrary] Failed to instantiate GLB probe: {displayName}");
+                Destroy(root);
+                yield break;
+            }
+
+            if (TryComputePlacementTransform(root, worldPos, targetBaseY, DefaultPlacementSize, out var finalPosition, out var finalScale))
+            {
+                if (NetworkPlayerSetup.Local != null)
+                {
+                    NetworkPlayerSetup.Local.RequestPlace($"glb:{displayName}", finalPosition, Quaternion.identity, finalScale);
+                }
+            }
+
+            Destroy(root);
         }
 
         private IEnumerator LoadGlbAndPlace(TextAsset glb, string displayName, Vector3 worldPos, float targetBaseY)
@@ -400,7 +465,7 @@ namespace Morphis.ModelPlacement
             }
 
             EnsureColliderFromRenderers(root);
-            NormalizeScale(root, targetSize: 1.0f);
+            NormalizeScale(root, targetSize: DefaultPlacementSize);
             SnapToGround(root, targetBaseY);
             EnsurePlaceableComponents(root);
             EnsureWorldObjectForSnapshot(root, $"{resourcesPath}/{displayName}");
@@ -418,8 +483,8 @@ namespace Morphis.ModelPlacement
 
             var ray = _cam.ScreenPointToRay(screenPos);
 
-            // Prefer collider hit
-            if (Physics.Raycast(ray, out var hit, 500f, ~0, QueryTriggerInteraction.Ignore))
+            // Prefer environment hit while skipping movable objects / player / companion.
+            if (TryGetPlacementHit(ray, out var hit))
             {
                 worldPos = hit.point;
                 targetBaseY = hit.point.y; 
@@ -435,6 +500,76 @@ namespace Morphis.ModelPlacement
             }
 
             return false;
+        }
+
+        internal static bool TryGetPlacementHit(Ray ray, out RaycastHit bestHit, Transform ignoreRoot = null)
+        {
+            bestHit = default;
+            var hits = Physics.RaycastAll(ray, 1000f, ~0, QueryTriggerInteraction.Ignore);
+            if (hits == null || hits.Length == 0)
+            {
+                return false;
+            }
+
+            Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+            foreach (var hit in hits)
+            {
+                if (ShouldIgnorePlacementHit(hit.collider, ignoreRoot))
+                {
+                    continue;
+                }
+
+                bestHit = hit;
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static float ResolveGroundHeightAt(Vector3 position, float fallbackGroundY, Transform ignoreRoot = null)
+        {
+            var origin = position + Vector3.up * DownwardProbeHeight;
+            var hits = Physics.RaycastAll(origin, Vector3.down, DownwardProbeDistance, ~0, QueryTriggerInteraction.Ignore);
+            if (hits == null || hits.Length == 0)
+            {
+                return fallbackGroundY;
+            }
+
+            Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+            foreach (var hit in hits)
+            {
+                if (ShouldIgnorePlacementHit(hit.collider, ignoreRoot))
+                {
+                    continue;
+                }
+
+                return hit.point.y;
+            }
+
+            return fallbackGroundY;
+        }
+
+        internal static bool TryComputePlacementTransform(GameObject probe, Vector3 worldPos, float targetBaseY, float targetSize, out Vector3 finalPosition, out Vector3 finalScale)
+        {
+            finalPosition = worldPos;
+            finalScale = Vector3.one;
+
+            if (probe == null)
+            {
+                return false;
+            }
+
+            probe.hideFlags = HideFlags.HideAndDontSave;
+            probe.transform.position = worldPos;
+            probe.transform.rotation = Quaternion.identity;
+
+            EnsureColliderFromRenderers(probe);
+            NormalizeScale(probe, targetSize);
+            SnapToGround(probe, targetBaseY);
+
+            finalPosition = probe.transform.position;
+            finalScale = probe.transform.localScale;
+            return true;
         }
 
         private void EnsurePlaceableComponents(GameObject go)
@@ -524,6 +659,28 @@ namespace Morphis.ModelPlacement
                 b.Encapsulate(renderers[i].bounds);
             hasBounds = true;
             return b;
+        }
+
+        private static bool ShouldIgnorePlacementHit(Collider collider, Transform ignoreRoot)
+        {
+            if (collider == null)
+            {
+                return true;
+            }
+
+            var hitTransform = collider.transform;
+            if (ignoreRoot != null && (hitTransform == ignoreRoot || hitTransform.IsChildOf(ignoreRoot)))
+            {
+                return true;
+            }
+
+            if (collider.GetComponentInParent<PlaceableObjectMover>() != null) return true;
+            if (collider.GetComponentInParent<WorldObject>() != null) return true;
+            if (collider.GetComponentInParent<NetworkPlayerSetup>() != null) return true;
+            if (collider.GetComponentInParent<ThirdPersonController>() != null) return true;
+            if (collider.GetComponentInParent<DogCompanion>() != null) return true;
+
+            return false;
         }
 
         private static TMP_Text CreateText(Transform parent, string text, float size, FontStyles style)

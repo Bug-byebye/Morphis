@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using GLTFast;
+using Morphis.ModelPlacement;
 using Morphis.WorldSnapshot;
 using Mirror;
 using StarterAssets;
@@ -262,11 +263,13 @@ namespace Morphis.UI.HotBar
             if (_cam == null) return false;
 
             Vector3 worldPos;
+            float targetBaseY = groundY;
             var ray = _cam.ScreenPointToRay(screenPos);
 
-            if (Physics.Raycast(ray, out var hit, 500f, ~0, QueryTriggerInteraction.Ignore))
+            if (ModelLibraryUI.TryGetPlacementHit(ray, out var hit))
             {
                 worldPos = hit.point;
+                targetBaseY = hit.point.y;
             }
             else
             {
@@ -281,12 +284,20 @@ namespace Morphis.UI.HotBar
                 if (NetworkClient.active)
                 {
                     if (NetworkPlayerSetup.Local == null) return false;
-                    return NetworkPlayerSetup.Local.RequestPlace($"{resourcesPath}/{item.Name}", worldPos, Quaternion.identity, Vector3.one);
+                    var probe = Instantiate(item.Prefab);
+                    if (!ModelLibraryUI.TryComputePlacementTransform(probe, worldPos, targetBaseY, 1.0f, out var finalPosition, out var finalScale))
+                    {
+                        Destroy(probe);
+                        return false;
+                    }
+
+                    Destroy(probe);
+                    return NetworkPlayerSetup.Local.RequestPlace($"{resourcesPath}/{item.Name}", finalPosition, Quaternion.identity, finalScale);
                 }
 
                 var go = Instantiate(item.Prefab, worldPos, Quaternion.identity);
                 EnsureColliderFromRenderers(go);
-                NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
+                NormalizeScaleAndSnapToGround(go, targetBaseY, targetSize: 1.0f);
                 EnsurePlaceableComponents(go);
                 WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(go, $"{resourcesPath}/{item.Name}");
                 return true;
@@ -297,11 +308,11 @@ namespace Morphis.UI.HotBar
                 // 联机模式：客户端不直接加载/实例化，改为通知服务器生成 glb:<name>
                 if (NetworkClient.active)
                 {
-                    if (NetworkPlayerSetup.Local == null) return false;
-                    return NetworkPlayerSetup.Local.RequestPlace($"glb:{item.Name}", worldPos, Quaternion.identity, Vector3.one);
+                    StartCoroutine(RequestNetworkGlbPlacement(item.GlbAsset, item.Name, worldPos, targetBaseY));
+                    return true;
                 }
 
-                StartCoroutine(LoadGlbAndPlace(item.GlbAsset, item.Name, worldPos));
+                StartCoroutine(LoadGlbAndPlace(item.GlbAsset, item.Name, worldPos, targetBaseY));
                 return true;
             }
 
@@ -309,20 +320,65 @@ namespace Morphis.UI.HotBar
                 if (NetworkClient.active)
                 {
                     if (NetworkPlayerSetup.Local == null) return false;
-                    return NetworkPlayerSetup.Local.RequestPlace($"primitive:{item.FallbackPrimitive}", worldPos, Quaternion.identity, Vector3.one);
+                    var probe = GameObject.CreatePrimitive(item.FallbackPrimitive);
+                    probe.name = item.Name;
+                    if (!ModelLibraryUI.TryComputePlacementTransform(probe, worldPos, targetBaseY, 1.0f, out var finalPosition, out var finalScale))
+                    {
+                        Destroy(probe);
+                        return false;
+                    }
+
+                    Destroy(probe);
+                    return NetworkPlayerSetup.Local.RequestPlace($"primitive:{item.FallbackPrimitive}", finalPosition, Quaternion.identity, finalScale);
                 }
 
                 var go = GameObject.CreatePrimitive(item.FallbackPrimitive);
                 go.name = item.Name;
                 go.transform.position = worldPos;
-                NormalizeScaleAndSnapToGround(go, groundY, targetSize: 1.0f);
+                NormalizeScaleAndSnapToGround(go, targetBaseY, targetSize: 1.0f);
                 EnsurePlaceableComponents(go);
                 WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(go, $"primitive:{item.FallbackPrimitive}");
                 return true;
             }
         }
 
-        private IEnumerator LoadGlbAndPlace(TextAsset glb, string displayName, Vector3 worldPos)
+        private IEnumerator RequestNetworkGlbPlacement(TextAsset glb, string displayName, Vector3 worldPos, float targetBaseY)
+        {
+            if (glb == null) yield break;
+            if (NetworkPlayerSetup.Local == null) yield break;
+
+            var root = new GameObject($"PlacementProbe_{displayName}");
+            root.hideFlags = HideFlags.HideAndDontSave;
+            root.transform.position = worldPos;
+
+            var gltf = new GltfImport();
+            var loadTask = gltf.LoadGltfBinary(glb.bytes);
+            while (!loadTask.IsCompleted) yield return null;
+            if (!loadTask.Result)
+            {
+                Debug.LogError($"[HotBarManager] Failed to load GLB probe: {displayName}");
+                Destroy(root);
+                yield break;
+            }
+
+            var instTask = gltf.InstantiateMainSceneAsync(root.transform);
+            while (!instTask.IsCompleted) yield return null;
+            if (!instTask.Result)
+            {
+                Debug.LogError($"[HotBarManager] Failed to instantiate GLB probe: {displayName}");
+                Destroy(root);
+                yield break;
+            }
+
+            if (ModelLibraryUI.TryComputePlacementTransform(root, worldPos, targetBaseY, 1.0f, out var finalPosition, out var finalScale))
+            {
+                NetworkPlayerSetup.Local.RequestPlace($"glb:{displayName}", finalPosition, Quaternion.identity, finalScale);
+            }
+
+            Destroy(root);
+        }
+
+        private IEnumerator LoadGlbAndPlace(TextAsset glb, string displayName, Vector3 worldPos, float targetBaseY)
         {
             if (glb == null) yield break;
 
@@ -349,7 +405,7 @@ namespace Morphis.UI.HotBar
             }
 
             EnsureColliderFromRenderers(root);
-            NormalizeScaleAndSnapToGround(root, groundY, targetSize: 1.0f);
+            NormalizeScaleAndSnapToGround(root, targetBaseY, targetSize: 1.0f);
             EnsurePlaceableComponents(root);
             WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(root, $"{resourcesPath}/{displayName}");
         }
