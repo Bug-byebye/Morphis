@@ -1,5 +1,5 @@
 {
-  "ApiBaseUrl": "http://34.143.226.137:8000",
+  "ApiBaseUrl": "http://34.87.10.44:8000",
   "ServerListenAddress": "0.0.0.0",
   "ServerPort": 7777,
   "DefaultWorldId": "default-world",

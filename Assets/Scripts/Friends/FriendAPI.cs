@@ -204,7 +204,7 @@ namespace Morphis.Friends
 
         private static bool EnsureAuthenticated(Action<string> onError)
         {
-            if (!AppSession.IsLoggedIn || string.IsNullOrWhiteSpace(AppSession.Token))
+            if (!AppSession.IsLoggedIn || string.IsNullOrWhiteSpace(AppSession.Username))
             {
                 onError?.Invoke("Not logged in");
                 return false;
@@ -218,6 +218,11 @@ namespace Morphis.Friends
             if (!string.IsNullOrWhiteSpace(AppSession.Token))
             {
                 request.SetRequestHeader("Authorization", $"Bearer {AppSession.Token}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(AppSession.Username))
+            {
+                request.SetRequestHeader("X-Username", AppSession.Username);
             }
         }
 

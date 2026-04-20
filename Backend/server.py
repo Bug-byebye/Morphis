@@ -499,6 +499,32 @@ async def api_clear_human_chat(session_id: str = "default"):
     return {"status": "ok", "message": "Human conversation cleared"}
 
 
+def _resolve_friend_user(
+    db: Session,
+    authorization: Optional[str],
+    x_username: Optional[str],
+):
+    # Keep Bearer token as first priority, then fallback to username header for client compatibility.
+    if authorization:
+        try:
+            username = _require_user(authorization)
+            user = get_user_by_username(db, username)
+            if user is not None:
+                return user
+        except ValueError:
+            pass
+
+    fallback_username = (x_username or "").strip()
+    if fallback_username:
+        user = get_user_by_username(db, fallback_username)
+        if user is not None:
+            return user
+
+    if authorization:
+        raise ValueError("Invalid token")
+    raise ValueError("Missing Authorization header")
+
+
 @app.get("/health")
 async def health():
     """健康检查"""
@@ -1163,16 +1189,15 @@ async def api_clear_human_chat(session_id: str = "default"):
 @app.get("/friends", response_model=FriendsStateResponse)
 async def list_friends(
     authorization: Optional[str] = Header(default=None),
+    x_username: Optional[str] = Header(default=None, alias="X-Username"),
     db: Session = Depends(get_db),
 ):
     try:
-        username = _require_user(authorization)
+        user = _resolve_friend_user(db, authorization, x_username)
     except ValueError as e:
         return Response(content=str(e), status_code=401)
 
-    user = get_user_by_username(db, username)
-    if user is None:
-        return Response(content="User not found", status_code=401)
+    username = user.username
 
     friend_rows = get_friendship_rows_for_user(db, user.id)
     incoming_rows = get_incoming_friend_request_rows(db, user.id)
@@ -1210,16 +1235,15 @@ async def list_friends(
 async def send_friend_request(
     request: SendFriendRequestPayload,
     authorization: Optional[str] = Header(default=None),
+    x_username: Optional[str] = Header(default=None, alias="X-Username"),
     db: Session = Depends(get_db),
 ):
     try:
-        username = _require_user(authorization)
+        sender = _resolve_friend_user(db, authorization, x_username)
     except ValueError as e:
         return Response(content=str(e), status_code=401)
 
-    sender = get_user_by_username(db, username)
-    if sender is None:
-        return Response(content="User not found", status_code=401)
+    username = sender.username
 
     target_username = (request.target_username or "").strip()
     if not target_username:
@@ -1251,16 +1275,13 @@ async def send_friend_request(
 async def accept_friend_request_api(
     request_id: int,
     authorization: Optional[str] = Header(default=None),
+    x_username: Optional[str] = Header(default=None, alias="X-Username"),
     db: Session = Depends(get_db),
 ):
     try:
-        username = _require_user(authorization)
+        user = _resolve_friend_user(db, authorization, x_username)
     except ValueError as e:
         return Response(content=str(e), status_code=401)
-
-    user = get_user_by_username(db, username)
-    if user is None:
-        return Response(content="User not found", status_code=401)
 
     friend_request = get_pending_friend_request_for_receiver(db, request_id, user.id)
     if friend_request is None:
@@ -1274,16 +1295,13 @@ async def accept_friend_request_api(
 async def decline_friend_request_api(
     request_id: int,
     authorization: Optional[str] = Header(default=None),
+    x_username: Optional[str] = Header(default=None, alias="X-Username"),
     db: Session = Depends(get_db),
 ):
     try:
-        username = _require_user(authorization)
+        user = _resolve_friend_user(db, authorization, x_username)
     except ValueError as e:
         return Response(content=str(e), status_code=401)
-
-    user = get_user_by_username(db, username)
-    if user is None:
-        return Response(content="User not found", status_code=401)
 
     friend_request = get_pending_friend_request_for_receiver(db, request_id, user.id)
     if friend_request is None:
