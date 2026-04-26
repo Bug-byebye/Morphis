@@ -10,7 +10,7 @@ from typing import Optional, List, Dict
 from pydantic import BaseModel
 
 # Vertex AI 配置
-PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "project-296af11f-afb9-44ba-a98")
+PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "project-95884255-83f6-436a-9e2")
 LOCATION = os.getenv("VERTEX_LOCATION", "global")
 MODEL_ID = os.getenv(
     "VERTEX_HUMAN_MODEL_ID",

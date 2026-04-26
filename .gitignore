@@ -86,6 +86,7 @@ wheels/
 .installed.cfg
 *.egg
 venv/
+Backend/venv.empty-*/
 ENV/
 env/
 
