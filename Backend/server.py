@@ -601,7 +601,6 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 import base64
 import secrets
-from urllib.parse import urlparse
 
 # 导入服务模块
 from services import text2image, image2image, image23d, text23d
@@ -616,7 +615,12 @@ from services.human_chat import (
 # 导入世界快照路由和数据库初始化
 from routers import world, world_manager
 from database import init_db, get_db
-from config import get_api_base_url, get_server_listen_address, get_server_port
+from config import (
+    get_api_base_url,
+    get_public_game_server_address,
+    get_server_listen_address,
+    get_server_port,
+)
 from crud import (
     get_user_by_username,
     create_user,
@@ -885,9 +889,8 @@ async def join_world(
     if result["status"] == "error":
         return Response(content=result["message"], status_code=500)
     
-    # 获取服务器地址（从 deploy/server-config.json 的 ApiBaseUrl 解析）
-    parsed = urlparse(get_api_base_url())
-    server_ip = parsed.hostname or "127.0.0.1"
+    # Mirror 对外地址允许与 Backend API 地址分离配置。
+    server_ip = get_public_game_server_address()
     
     return JoinWorldResponse(
         status="ok",

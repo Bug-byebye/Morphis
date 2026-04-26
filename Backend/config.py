@@ -47,6 +47,15 @@ def get_server_port() -> int:
     return 443 if parsed.scheme == "https" else 8000
 
 
+def get_public_game_server_address() -> str:
+    value = _load_raw_config().get("PublicGameServerAddress")
+    if value:
+        return str(value)
+
+    parsed = urlparse(get_api_base_url())
+    return str(parsed.hostname or "127.0.0.1")
+
+
 def get_unity_server_config() -> Dict[str, Any]:
     return dict(_load_raw_config().get("UnityServer", {}))
 

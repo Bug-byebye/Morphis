@@ -231,7 +231,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ff4f55ecb3581f940b30701709fad572, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Morphis.AppFlow.BootFlowManager
-  baseUrl: http://localhost:8000
+  baseUrl: http://35.232.83.9:8000
   mainSceneName: MainScene
   backgroundSkybox: {fileID: 0}
 --- !u!4 &868231827

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -22,12 +23,16 @@ namespace Mirror
 
         class Styles
         {
-            public GUIStyle labelStyle = new GUIStyle(EditorStyles.label);
-            public GUIStyle componentName = new GUIStyle(EditorStyles.boldLabel);
-            public GUIStyle disabledName = new GUIStyle(EditorStyles.miniLabel);
+            public GUIStyle labelStyle;
+            public GUIStyle componentName;
+            public GUIStyle disabledName;
 
             public Styles()
             {
+                labelStyle = CreateStyle(() => EditorStyles.label);
+                componentName = CreateStyle(() => EditorStyles.boldLabel);
+                disabledName = CreateStyle(() => EditorStyles.miniLabel);
+
                 Color fontColor = new Color(0.7f, 0.7f, 0.7f);
                 labelStyle.padding.right += 20;
                 labelStyle.normal.textColor = fontColor;
@@ -57,10 +62,28 @@ namespace Mirror
                 disabledName.onFocused.textColor = fontColor;
                 disabledName.onHover.textColor = fontColor;
             }
+
+            static GUIStyle CreateStyle(Func<GUIStyle> getBaseStyle)
+            {
+                try
+                {
+                    GUIStyle baseStyle = getBaseStyle();
+                    if (baseStyle != null)
+                    {
+                        return new GUIStyle(baseStyle);
+                    }
+                }
+                catch
+                {
+                    // Unity can request previews before editor styles are ready.
+                }
+
+                return new GUIStyle();
+            }
         }
 
         GUIContent title;
-        Styles styles = new Styles();
+        Styles styles;
 
         public override GUIContent GetPreviewTitle()
         {
@@ -95,8 +118,8 @@ namespace Mirror
             if (identity == null)
                 return;
 
-            if (styles == null)
-                styles = new Styles();
+            if (!EnsureStyles())
+                return;
 
 
             // padding
@@ -115,6 +138,22 @@ namespace Mirror
 
             _ = DrawOwner(identity, initialX, Y);
 
+        }
+
+        bool EnsureStyles()
+        {
+            if (styles != null)
+                return true;
+
+            try
+            {
+                styles = new Styles();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         float DrawNetworkIdentityInfo(NetworkIdentity identity, float initialX, float Y)

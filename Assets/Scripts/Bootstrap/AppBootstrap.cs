@@ -132,8 +132,8 @@ namespace Morphis
                 }
                 else
                 {
-                    // Fallback：如果没有动态地址（例如直接 Play MainScene），使用 localhost
-                    manager.networkAddress = "127.0.0.1";
+                    // Fallback：如果没有动态地址（例如直接 Play MainScene），使用默认远端服务器
+                    manager.networkAddress = "35.232.83.9";
                     
                     var telepathy = manager.GetComponent<TelepathyTransport>();
                     if (telepathy != null)
