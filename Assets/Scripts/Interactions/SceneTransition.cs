@@ -9,15 +9,35 @@ using UnityEngine.InputSystem;
 namespace Interactions
 {
     /// <summary>
-    /// Attach this script to any 3D object with a Collider to enable 
-    /// double-click scene transitions.
+    /// Attach this script to any 3D object with a Collider to enable
+    /// double-click scene transitions or teleports.
     /// </summary>
     // [RequireComponent(typeof(Collider))] - Removed to avoid "Add component failed" error if collider is missing
     public class SceneTransition : MonoBehaviour, IPointerClickHandler
     {
+        public enum TransitionMode
+        {
+            LoadScene,
+            TeleportWithinScene
+        }
+
+        [Header("Mode")]
+        [Tooltip("Choose whether double-clicking loads another scene or teleports inside the current one.")]
+        public TransitionMode transitionMode = TransitionMode.LoadScene;
+
         [Header("Scene Settings")]
         [Tooltip("The exact name of the scene file (without .unity extension) to load.")]
         public string targetSceneName = "demo";
+
+        [Header("Teleport Settings")]
+        [Tooltip("Primary teleport point. If a secondary point is also assigned, the player will teleport to the opposite side of whichever point they are currently closer to.")]
+        public Transform teleportTarget;
+        [Tooltip("Optional second teleport point for round-trip doors. Example: outside point + inside point.")]
+        public Transform secondaryTeleportTarget;
+        [Tooltip("Small upward offset to reduce the chance of spawning inside the floor.")]
+        public Vector3 teleportOffset = new Vector3(0f, 0.1f, 0f);
+        [Tooltip("If enabled, the player will also face the target point's rotation.")]
+        public bool matchTargetRotation = true;
         
         [Header("Interaction Settings")]
         [Tooltip("Max seconds between clicks to count as a double click.")]
@@ -100,12 +120,25 @@ namespace Interactions
             if (timeSinceLast <= doubleClickThreshold)
             {
                 // Prevent triple-click weirdness
-                lastClickTime = -100f; 
-                LoadTargetScene();
+                lastClickTime = -100f;
+                TriggerTransition();
             }
             else
             {
                 lastClickTime = Time.time;
+            }
+        }
+
+        private void TriggerTransition()
+        {
+            switch (transitionMode)
+            {
+                case TransitionMode.TeleportWithinScene:
+                    TeleportWithinCurrentScene();
+                    break;
+                default:
+                    LoadTargetScene();
+                    break;
             }
         }
 
@@ -193,6 +226,77 @@ namespace Interactions
             _isLoadingScene = false;
         }
 
+        private void TeleportWithinCurrentScene()
+        {
+            if (teleportTarget == null)
+            {
+                Debug.LogWarning($"[SceneTransition] Teleport target is not assigned on {gameObject.name}.");
+                return;
+            }
+
+            GameObject player = ResolvePlayerObject();
+            if (player == null)
+            {
+                Debug.LogWarning("[SceneTransition] Could not find a player to teleport.");
+                return;
+            }
+
+            var destination = ResolveTeleportDestination(player.transform);
+            var targetPos = destination.position + teleportOffset;
+            var targetRot = matchTargetRotation ? destination.rotation : player.transform.rotation;
+
+            TeleportPlayer(player, targetPos, targetRot);
+
+            // Like scene transitions, cycling input helps avoid stale action state.
+            ReactivatePlayerInput(player);
+
+            Debug.Log(
+                $"[SceneTransition] Teleported player within scene '{gameObject.scene.name}' " +
+                $"to target '{destination.name}' at {targetPos}."
+            );
+        }
+
+        private Transform ResolveTeleportDestination(Transform playerTransform)
+        {
+            if (teleportTarget == null)
+            {
+                return null;
+            }
+
+            if (secondaryTeleportTarget == null || playerTransform == null)
+            {
+                return teleportTarget;
+            }
+
+            float distToPrimary = (playerTransform.position - teleportTarget.position).sqrMagnitude;
+            float distToSecondary = (playerTransform.position - secondaryTeleportTarget.position).sqrMagnitude;
+
+            // If the player is currently closer to one side of the doorway, send them to the opposite side.
+            return distToPrimary <= distToSecondary ? secondaryTeleportTarget : teleportTarget;
+        }
+
+        private GameObject ResolvePlayerObject()
+        {
+            if (NetworkClient.localPlayer != null)
+            {
+                return NetworkClient.localPlayer.gameObject;
+            }
+
+            var taggedPlayer = GameObject.FindGameObjectWithTag("Player");
+            if (taggedPlayer != null)
+            {
+                return taggedPlayer;
+            }
+
+            var controller = FindFirstObjectByType<CharacterController>();
+            if (controller != null)
+            {
+                return controller.gameObject;
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// After a scene move, the PlayerInput component may silently lose its
         /// action activation.  Cycling enabled off→on forces a full re-init
@@ -260,6 +364,13 @@ namespace Interactions
                 }
             }
 
+            TeleportPlayer(player, targetPos, targetRot);
+
+            Debug.Log($"[SceneTransition] Teleported player to {(found ? "SpawnPoint" : "default position")} at {targetPos} in scene '{scene.name}'");
+        }
+
+        private void TeleportPlayer(GameObject player, Vector3 targetPos, Quaternion targetRot)
+        {
             // Disable CharacterController before teleport (it blocks transform.position changes)
             var cc = player.GetComponent<CharacterController>();
             bool ccWasEnabled = cc != null && cc.enabled;
@@ -269,8 +380,6 @@ namespace Interactions
             player.transform.rotation = targetRot;
 
             if (cc != null) cc.enabled = ccWasEnabled;
-
-            Debug.Log($"[SceneTransition] Teleported player to {(found ? "SpawnPoint" : "default position")} at {targetPos} in scene '{scene.name}'");
         }
 
         /// <summary>
