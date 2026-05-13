@@ -55,6 +55,7 @@ namespace Morphis.Friends
         private SelectedAction _selectedAction = SelectedAction.None;
         private Coroutine _pollCoroutine;
         private Coroutine _toastCoroutine;
+        private bool _toggleButtonVisible = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoCreate()
@@ -141,6 +142,17 @@ namespace Morphis.Friends
         {
             if (_isOpen) ClosePanel();
             else OpenPanel();
+        }
+
+        public void ToggleFromHud()
+        {
+            TogglePanel();
+        }
+
+        public void SetToggleButtonVisible(bool visible)
+        {
+            _toggleButtonVisible = visible;
+            UpdateToggleButtonVisibility();
         }
 
         private void OpenPanel()
@@ -604,17 +616,21 @@ namespace Morphis.Friends
         private void SetUiVisible(bool visible)
         {
             _uiVisible = visible;
-
-            if (_toggleButtonObject != null)
-            {
-                _toggleButtonObject.SetActive(visible);
-            }
+            UpdateToggleButtonVisibility();
 
             if (!visible)
             {
                 HideSelectionCard();
                 HideToastImmediate();
                 ClosePanel();
+            }
+        }
+
+        private void UpdateToggleButtonVisibility()
+        {
+            if (_toggleButtonObject != null)
+            {
+                _toggleButtonObject.SetActive(_uiVisible && _toggleButtonVisible);
             }
         }
 

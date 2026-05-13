@@ -39,6 +39,7 @@ namespace Morphis.ModelPlacement
         private Button _closeBtn;
         private Transform _listRoot;
         private bool _uiVisible = true;
+        private bool _launcherVisible = true;
 
         private Camera _cam;
         private readonly List<PlaceableDefinition> _items = new();
@@ -175,6 +176,20 @@ namespace Morphis.ModelPlacement
             }
         }
 
+        public void ToggleFromHud()
+        {
+            TogglePanel();
+        }
+
+        public void SetLauncherVisible(bool visible)
+        {
+            _launcherVisible = visible;
+            if (_toggleBtn != null)
+            {
+                _toggleBtn.gameObject.SetActive(_uiVisible && _launcherVisible);
+            }
+        }
+
         private void SetPanelVisible(bool visible)
         {
             _panel.gameObject.SetActive(visible);
@@ -224,7 +239,7 @@ namespace Morphis.ModelPlacement
 
             if (_toggleBtn != null)
             {
-                _toggleBtn.gameObject.SetActive(_uiVisible);
+                _toggleBtn.gameObject.SetActive(_uiVisible && _launcherVisible);
             }
 
             if (!_uiVisible)

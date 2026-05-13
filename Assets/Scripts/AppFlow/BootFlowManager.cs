@@ -8,6 +8,9 @@ using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using System.Linq; // for finding starter assets inputs
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
@@ -35,6 +38,12 @@ namespace Morphis.AppFlow
         [Header("Scene")]
         [SerializeField] private string mainSceneName = "MainScene";
         [SerializeField] private Material backgroundSkybox;
+        [Header("Login Art")]
+        [SerializeField] private Sprite loginBackgroundSprite;
+        [SerializeField] private Sprite leftLanternSprite;
+        [SerializeField] private Sprite rightMascotSprite;
+        [SerializeField] private Sprite rightStillLifeSprite;
+        private Sprite[] _ambientEffectSprites;
 
         private Camera _skyboxCamera;
 
@@ -76,6 +85,8 @@ namespace Morphis.AppFlow
         private bool _initialized;
         private bool _createdEventSystem;
         private GameObject _createdEventSystemGO;
+        private TMP_FontAsset _uiFont;
+        private Button _selectedWorkspaceButton;
 
         private void Awake()
         {
@@ -269,21 +280,17 @@ namespace Morphis.AppFlow
             Cursor.visible = true;
             Debug.Log("[BootFlow] Cursor unlocked and visible");
             
-            // 先用英文，避免 TMP 默认字体缺中文导致的警告刷屏；后续我们再接入中文字体资源。
-            SetStatus("Enter username/password (default: 111111 / 111111)");
-            
             Debug.Log("[BootFlow] UI initialization complete! Canvas and EventSystem should be ready.");
         }
 
         private void BuildUI()
         {
-            // 先确保 EventSystem 存在并正确配置
             EnsureEventSystem();
+            LoadUiResources();
 
-            // Canvas
             Debug.Log("[BootFlow] Creating Canvas...");
             var canvasGO = new GameObject("BootCanvas");
-            canvasGO.SetActive(true); // 先激活 GameObject
+            canvasGO.SetActive(true);
             
             _canvas = canvasGO.AddComponent<Canvas>();
             _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -295,90 +302,114 @@ namespace Morphis.AppFlow
             scaler.matchWidthOrHeight = 0.5f;
             
             var raycaster = canvasGO.AddComponent<GraphicRaycaster>();
-            
-            // 确保所有组件都激活
             _canvas.enabled = true;
             raycaster.enabled = true;
-            
-            // 强制设置 Canvas 为激活状态
             canvasGO.SetActive(true);
             
             Debug.Log($"[BootFlow] Canvas created: renderMode={_canvas.renderMode}, enabled={_canvas.enabled}, active={canvasGO.activeSelf}");
-
             DontDestroyOnLoad(canvasGO);
 
-            // Background
-            Debug.Log("[BootFlow] Creating background...");
-            var bg = new GameObject("Background");
-            bg.transform.SetParent(_canvas.transform, false);
-            bg.transform.SetAsFirstSibling(); // 确保背景在最底层
-            var bgRect = bg.AddComponent<RectTransform>();
-            Stretch(bgRect);
-            var bgImg = bg.AddComponent<Image>();
-            
-            // 确保 Image 组件正确初始化
-            bgImg.raycastTarget = false; // 背景不需要接收射线检测
-            bgImg.maskable = false;
-            
-            if (backgroundSkybox != null)
+            var background = new GameObject("Background");
+            background.transform.SetParent(_canvas.transform, false);
+            var backgroundRect = background.AddComponent<RectTransform>();
+            Stretch(backgroundRect);
+
+            var backgroundImageGO = new GameObject("BackgroundImage");
+            backgroundImageGO.transform.SetParent(background.transform, false);
+            var backgroundImageRect = backgroundImageGO.AddComponent<RectTransform>();
+            Stretch(backgroundImageRect);
+            var backgroundImage = backgroundImageGO.AddComponent<Image>();
+            if (loginBackgroundSprite != null)
             {
-                Debug.Log("[BootFlow] Skybox material FOUND. Setting up transparent background.");
-                // 透明背景，透出后方的 Skybox Camera
-                bgImg.color = Color.clear;
-                SetupSkyboxCamera();
+                backgroundImage.sprite = loginBackgroundSprite;
+                backgroundImage.color = Color.white;
+                backgroundImage.preserveAspect = true;
             }
             else
             {
-                Debug.LogWarning("[BootFlow] backgroundSkybox is NULL! Using default dark background.");
-                // 设为完全不透明，确保启动时看不到后面的场景
-                bgImg.color = new Color(0.06f, 0.06f, 0.08f, 1.0f);
+                backgroundImage.color = new Color(0.04f, 0.05f, 0.12f, 1f);
             }
-            
-            // 确保背景激活并强制刷新
-            bg.SetActive(true);
-            bgRect.ForceUpdateRectTransforms();
-            Debug.Log($"[BootFlow] Background created: color={bgImg.color}, active={bg.activeSelf}");
+            backgroundImage.raycastTarget = false;
 
-            // Root container
-            var root = new GameObject("Root");
-            root.transform.SetParent(bg.transform, false);
-            var rootRect = root.AddComponent<RectTransform>();
-            rootRect.anchorMin = new Vector2(0.5f, 0.5f);
-            rootRect.anchorMax = new Vector2(0.5f, 0.5f);
-            rootRect.pivot = new Vector2(0.5f, 0.5f);
-            // TARGET: ~1/3 Screen Area. 1920x1080 -> ~640x360 is 1/9 area. 
-            // 1/3 area is huge. Let's go for 1/3 Width (640) and 2/3 Height (720)?
-            // User asked for "1/3 OF THE SCREEN AREA", that implies Sqrt(1/3) linear scale ~= 0.58 width/height.
-            // 1920 * 0.58 = 1100. 1080 * 0.58 = 620.
-            // Let's use 1000 x 800 for a solid block.
-            rootRect.sizeDelta = new Vector2(1000, 800); 
-            rootRect.anchoredPosition = Vector2.zero;
+            var darkOverlayGO = new GameObject("DarkOverlay");
+            darkOverlayGO.transform.SetParent(background.transform, false);
+            var darkOverlayRect = darkOverlayGO.AddComponent<RectTransform>();
+            Stretch(darkOverlayRect);
+            var darkOverlay = darkOverlayGO.AddComponent<Image>();
+            darkOverlay.color = new Color32(0x05, 0x06, 0x17, 0x59);
+            darkOverlay.raycastTarget = false;
 
-            // Title
-            // Title
-            _title = CreateText(root.transform, "Morphis", 100, FontStyles.Bold); // Even Bigger Title
-            var titleRect = _title.GetComponent<RectTransform>();
-            titleRect.anchorMin = new Vector2(0, 1);
-            titleRect.anchorMax = new Vector2(1, 1);
-            titleRect.pivot = new Vector2(0.5f, 0); // Pivot Bottom
-            // Move UPWARDS outside the root box. 
-            // Root is 1000x800. Anchor (0.5, 1) is Top Center.
-            // Pos Y=0 is top edge. We want it ABOVE.
-            titleRect.anchoredPosition = new Vector2(0, 20); 
-            titleRect.sizeDelta = new Vector2(0, 120);
+            if (loginBackgroundSprite == null && backgroundSkybox != null)
+            {
+                SetupSkyboxCamera();
+            }
+
+            var decorations = new GameObject("Decorations");
+            decorations.transform.SetParent(_canvas.transform, false);
+            var decorationsRect = decorations.AddComponent<RectTransform>();
+            Stretch(decorationsRect);
+
+            CreateAmbientEffects(decorations.transform);
+
+            var titleGroup = new GameObject("TitleGroup");
+            titleGroup.transform.SetParent(_canvas.transform, false);
+            var titleGroupRect = titleGroup.AddComponent<RectTransform>();
+            titleGroupRect.anchorMin = new Vector2(0.5f, 1f);
+            titleGroupRect.anchorMax = new Vector2(0.5f, 1f);
+            titleGroupRect.pivot = new Vector2(0.5f, 1f);
+            titleGroupRect.sizeDelta = new Vector2(1280f, 220f);
+            titleGroupRect.anchoredPosition = new Vector2(0f, -108f);
+
+            _title = CreateText(titleGroup.transform, "Morphis", 104, FontStyles.Bold);
+            _title.gameObject.name = "TitleText";
+            var titleRect = _title.rectTransform;
+            titleRect.anchorMin = new Vector2(0.5f, 1f);
+            titleRect.anchorMax = new Vector2(0.5f, 1f);
+            titleRect.pivot = new Vector2(0.5f, 1f);
+            titleRect.sizeDelta = new Vector2(1120f, 116f);
+            titleRect.anchoredPosition = new Vector2(0f, 0f);
             _title.alignment = TextAlignmentOptions.Center;
-            // Add a subtle shadow or outline to make it pop against skybox
-            _title.outlineWidth = 0.2f;
-            _title.outlineColor = new Color(0,0,0,0.5f);
+            _title.color = new Color32(0xF5, 0xD8, 0xFF, 0xFF);
+            _title.outlineWidth = 0.12f;
+            _title.outlineColor = new Color32(0x74, 0x59, 0xC9, 0xAA);
 
+            var subtitle = CreateText(titleGroup.transform, "你的专属情感陪伴", 28, FontStyles.Normal);
+            subtitle.gameObject.name = "SubtitleText";
+            var subtitleRect = subtitle.rectTransform;
+            subtitleRect.anchorMin = new Vector2(0.5f, 1f);
+            subtitleRect.anchorMax = new Vector2(0.5f, 1f);
+            subtitleRect.pivot = new Vector2(0.5f, 1f);
+            subtitleRect.sizeDelta = new Vector2(920f, 38f);
+            subtitleRect.anchoredPosition = new Vector2(0f, -118f);
+            subtitle.alignment = TextAlignmentOptions.Center;
+            subtitle.color = new Color(0.847f, 0.78f, 1f, 0.9f);
 
+            _loginPanel = BuildLoginPanel(_canvas.transform);
+            _workspacePanel = BuildWorkspacePanel(_canvas.transform);
+            _createSpacePanel = BuildCreateSpacePanel(_canvas.transform);
 
-            // Panels
-            _loginPanel = BuildLoginPanel(root.transform);
-            _workspacePanel = BuildWorkspacePanel(root.transform);
-            _createSpacePanel = BuildCreateSpacePanel(root.transform);
+            _status = CreateText(_canvas.transform, "", 20, FontStyles.Normal);
+            _status.gameObject.name = "StatusText";
+            var statusRect = _status.rectTransform;
+            statusRect.anchorMin = new Vector2(0.5f, 0f);
+            statusRect.anchorMax = new Vector2(0.5f, 0f);
+            statusRect.pivot = new Vector2(0.5f, 0f);
+            statusRect.sizeDelta = new Vector2(1100f, 30f);
+            statusRect.anchoredPosition = new Vector2(0f, 86f);
+            _status.alignment = TextAlignmentOptions.Center;
+            _status.color = new Color(0.847f, 0.78f, 1f, 0.78f);
 
-            // 进入引导时，必须确保鼠标可用（能点 UI）
+            var footerText = CreateText(_canvas.transform, "在这里，你的情绪被理解，你的心灵被陪伴", 22, FontStyles.Normal);
+            footerText.gameObject.name = "FooterText";
+            var footerRect = footerText.rectTransform;
+            footerRect.anchorMin = new Vector2(0.5f, 0f);
+            footerRect.anchorMax = new Vector2(0.5f, 0f);
+            footerRect.pivot = new Vector2(0.5f, 0f);
+            footerRect.sizeDelta = new Vector2(1200f, 34f);
+            footerRect.anchoredPosition = new Vector2(0f, 55f);
+            footerText.alignment = TextAlignmentOptions.Center;
+            footerText.color = new Color(0.847f, 0.78f, 1f, 0.55f);
+
             SetCursorForUI(true);
         }
 
@@ -418,105 +449,94 @@ namespace Morphis.AppFlow
 
         private GameObject BuildLoginPanel(Transform parent)
         {
-            var panel = CreatePanel(parent, "LoginPanel");
+            var panel = CreatePanel(parent, "LoginCard", new Vector2(620f, 420f), new Color(0.607f, 0.509f, 1f, 0.35f));
             panel.SetActive(false);
+            panel.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -10f);
+            var content = CreateInnerFill(panel.transform, "CardFill", new Vector2(616f, 416f), new Color(0.129f, 0.106f, 0.275f, 0.72f));
 
-            // Layout Constants for BIG UI
-            float contentWidth = 800;
-            float inputHeight = 80;
-            float labelHeight = 50;
-            float fontSizeLabel = 32;
-            float buttonHeight = 90;
-            
-            float startY = 160; 
-            float gap = 40;
-
-            // ============ Username ============
-            // Label
-            var userLabel = CreateText(panel.transform, "用户名", fontSizeLabel, FontStyles.Bold);
-            var userLabelRect = userLabel.rectTransform;
-            userLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
-            userLabelRect.anchorMin = new Vector2(0.5f, 1);
-            userLabelRect.anchorMax = new Vector2(0.5f, 1);
-            userLabelRect.pivot = new Vector2(0, 1);
-            // Left align relative to center: -HalfWidth
-            userLabelRect.anchoredPosition = new Vector2(-contentWidth/2, -startY); 
-            userLabel.alignment = TextAlignmentOptions.BottomLeft;
-
-            // Input
-            _usernameInput = CreateInput(panel.transform, "");
+            _usernameInput = CreateInput(content.transform, "UsernameInput", "用户名");
             var userInRt = _usernameInput.GetComponent<RectTransform>();
-            userInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
-            PositionRow(userInRt, y: startY + labelHeight + 10); // 10px padding
+            userInRt.sizeDelta = new Vector2(480f, 58f);
+            PositionRow(userInRt, 55f);
 
-            // ============ Password ============
-            float passY = startY + labelHeight + inputHeight + gap;
-            
-            // Label
-            var pwdLabel = CreateText(panel.transform, "密码", fontSizeLabel, FontStyles.Bold);
-            var pwdLabelRect = pwdLabel.rectTransform;
-            pwdLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
-            pwdLabelRect.anchorMin = new Vector2(0.5f, 1);
-            pwdLabelRect.anchorMax = new Vector2(0.5f, 1);
-            pwdLabelRect.pivot = new Vector2(0, 1);
-            pwdLabelRect.anchoredPosition = new Vector2(-contentWidth/2, -passY); // Gap from username input
-            pwdLabel.alignment = TextAlignmentOptions.BottomLeft;
-
-            // Input
-            _passwordInput = CreateInput(panel.transform, "", isPassword: true);
+            _passwordInput = CreateInput(content.transform, "PasswordInput", "密码", isPassword: true);
             var pwdInRt = _passwordInput.GetComponent<RectTransform>();
-            pwdInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
-            PositionRow(pwdInRt, y: passY + labelHeight + 10);
+            pwdInRt.sizeDelta = new Vector2(480f, 58f);
+            PositionRow(pwdInRt, 139f);
 
-            // ============ Buttons ============
-            float btnY = passY + labelHeight + inputHeight + gap * 2;
-            
-            _loginBtn = CreateButton(panel.transform, "登录", new Color(0.30f, 0.70f, 0.45f));
+            var forgot = CreateText(content.transform, "忘记密码？", 20, FontStyles.Normal);
+            forgot.gameObject.name = "ForgotPasswordText";
+            var forgotRect = forgot.rectTransform;
+            forgotRect.anchorMin = new Vector2(1f, 1f);
+            forgotRect.anchorMax = new Vector2(1f, 1f);
+            forgotRect.pivot = new Vector2(1f, 1f);
+            forgotRect.sizeDelta = new Vector2(180f, 26f);
+            forgotRect.anchoredPosition = new Vector2(-70f, -223f);
+            forgot.alignment = TextAlignmentOptions.TopRight;
+            forgot.color = new Color(0.788f, 0.721f, 1f, 0.75f);
+
+            var buttonGroup = new GameObject("ButtonGroup");
+            buttonGroup.transform.SetParent(content.transform, false);
+            var buttonGroupRect = buttonGroup.AddComponent<RectTransform>();
+            buttonGroupRect.anchorMin = new Vector2(0.5f, 0f);
+            buttonGroupRect.anchorMax = new Vector2(0.5f, 0f);
+            buttonGroupRect.pivot = new Vector2(0.5f, 0f);
+            buttonGroupRect.sizeDelta = new Vector2(466f, 62f);
+            buttonGroupRect.anchoredPosition = new Vector2(0f, 55f);
+
+            _loginBtn = CreateFilledButton(buttonGroup.transform, "LoginButton", "登录", new Vector2(220f, 62f), new Color(0.914f, 0.545f, 0.847f, 1f), Color.white);
             var loginRt = _loginBtn.GetComponent<RectTransform>();
-            loginRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight); 
-            PositionHalf(loginRt, left: true, y: btnY); 
+            loginRt.anchorMin = new Vector2(0f, 0.5f);
+            loginRt.anchorMax = new Vector2(0f, 0.5f);
+            loginRt.pivot = new Vector2(0f, 0.5f);
+            loginRt.anchoredPosition = new Vector2(0f, 0f);
             _loginBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Login()); });
-            _loginBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 36; 
 
-            _registerBtn = CreateButton(panel.transform, "注册", new Color(0.55f, 0.45f, 0.85f));
+            _registerBtn = CreateGhostButton(buttonGroup.transform, "RegisterButton", "注册", new Vector2(220f, 62f), new Color(0.607f, 0.509f, 1f, 0.35f), new Color(0.129f, 0.106f, 0.275f, 0.88f), new Color(0.847f, 0.78f, 1f, 1f));
             var regRt = _registerBtn.GetComponent<RectTransform>();
-            regRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
-            PositionHalf(regRt, left: false, y: btnY);
+            regRt.anchorMin = new Vector2(1f, 0.5f);
+            regRt.anchorMax = new Vector2(1f, 0.5f);
+            regRt.pivot = new Vector2(1f, 0.5f);
+            regRt.anchoredPosition = new Vector2(0f, 0f);
             _registerBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(Register()); });
-            _registerBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 36;
 
             return panel;
         }
 
         private GameObject BuildWorkspacePanel(Transform parent)
         {
-            var panel = CreatePanel(parent, "WorkspacePanel");
+            var panel = CreatePanel(parent, "WorkspacePanel", new Vector2(704f, 504f), new Color(0.607f, 0.509f, 1f, 0.28f));
             panel.SetActive(false);
+            panel.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -6f);
+            var content = CreateInnerFill(panel.transform, "PanelFill", new Vector2(700f, 500f), new Color(0.129f, 0.106f, 0.275f, 0.76f));
+            const float contentWidth = 500f;
+            const float buttonWidth = 237f;
+            const float buttonGap = 26f;
 
-            var header = CreateText(panel.transform, "选择空间", 32, FontStyles.Bold);
+            var header = CreateText(content.transform, "选择空间", 36, FontStyles.Bold);
             var headerRect = header.GetComponent<RectTransform>();
-            headerRect.anchorMin = new Vector2(0, 1);
-            headerRect.anchorMax = new Vector2(1, 1);
+            headerRect.anchorMin = new Vector2(0.5f, 1f);
+            headerRect.anchorMax = new Vector2(0.5f, 1f);
             headerRect.pivot = new Vector2(0.5f, 1);
-            headerRect.sizeDelta = new Vector2(0, 60);
-            headerRect.anchoredPosition = new Vector2(0, -20);
+            headerRect.sizeDelta = new Vector2(contentWidth, 56f);
+            headerRect.anchoredPosition = new Vector2(0, -46f);
             header.alignment = TextAlignmentOptions.Center;
+            header.color = new Color32(0xF5, 0xD8, 0xFF, 0xFF);
 
             var listBox = new GameObject("WorkspaceList");
-            listBox.transform.SetParent(panel.transform, false);
+            listBox.transform.SetParent(content.transform, false);
             var listRect = listBox.AddComponent<RectTransform>();
-            listRect.anchorMin = new Vector2(0.5f, 0.5f);
-            listRect.anchorMax = new Vector2(0.5f, 0.5f);
-            listRect.pivot = new Vector2(0.5f, 0.5f);
-            listRect.sizeDelta = new Vector2(480, 400);
-            listRect.anchoredPosition = new Vector2(0, 40);
-            
-            // Removed inner background image to avoid "double frame" look
-            // var listBg = listBox.AddComponent<Image>();
-            // listBg.color = new Color(0.12f, 0.12f, 0.16f, 1f);
+            listRect.anchorMin = new Vector2(0.5f, 1f);
+            listRect.anchorMax = new Vector2(0.5f, 1f);
+            listRect.pivot = new Vector2(0.5f, 1f);
+            listRect.sizeDelta = new Vector2(contentWidth, 238f);
+            listRect.anchoredPosition = new Vector2(0f, -116f);
+
+            var listBg = listBox.AddComponent<Image>();
+            listBg.color = new Color(0.09f, 0.086f, 0.20f, 0.90f);
 
             var layout = listBox.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(12, 12, 12, 12);
+            layout.padding = new RectOffset(14, 14, 14, 14);
             layout.spacing = 10;
             layout.childControlHeight = true;
             layout.childControlWidth = true;
@@ -525,107 +545,70 @@ namespace Morphis.AppFlow
 
             _workspaceListRoot = listBox.transform;
 
-            _enterBtn = CreateButton(panel.transform, "进入", new Color(0.30f, 0.55f, 0.90f));
-            // Larger Enter button
+            _enterBtn = CreateFilledButton(content.transform, "EnterButton", "进入空间", new Vector2(buttonWidth, 62f), new Color(0.914f, 0.545f, 0.847f, 1f), Color.white);
             var enterRect = _enterBtn.GetComponent<RectTransform>();
-            enterRect.anchorMin = new Vector2(0.5f, 0);
-            enterRect.anchorMax = new Vector2(0.5f, 0);
-            enterRect.pivot = new Vector2(0.5f, 0);
-            enterRect.sizeDelta = new Vector2(240, 60);
-            enterRect.anchoredPosition = new Vector2(0, 70); 
+            enterRect.anchorMin = new Vector2(0.5f, 0f);
+            enterRect.anchorMax = new Vector2(0.5f, 0f);
+            enterRect.pivot = new Vector2(0.5f, 0f);
+            enterRect.anchoredPosition = new Vector2(-(buttonWidth + buttonGap) * 0.5f, 54f);
             _enterBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(EnterMainScene()); });
-            _enterBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 32;
 
-            // Create Space button
-            _createSpaceBtn = CreateButton(panel.transform, "创建空间", new Color(0.40f, 0.65f, 0.40f));
+            _createSpaceBtn = CreateGhostButton(content.transform, "CreateSpaceButton", "创建空间", new Vector2(buttonWidth, 62f), new Color(0.607f, 0.509f, 1f, 0.35f), new Color(0.129f, 0.106f, 0.275f, 0.88f), new Color(0.847f, 0.78f, 1f, 1f));
             var createRect = _createSpaceBtn.GetComponent<RectTransform>();
-            createRect.anchorMin = new Vector2(0.5f, 0);
-            createRect.anchorMax = new Vector2(0.5f, 0);
-            createRect.pivot = new Vector2(0.5f, 0);
-            createRect.sizeDelta = new Vector2(240, 60);
-            createRect.anchoredPosition = new Vector2(0, 10);
+            createRect.anchorMin = new Vector2(0.5f, 0f);
+            createRect.anchorMax = new Vector2(0.5f, 0f);
+            createRect.pivot = new Vector2(0.5f, 0f);
+            createRect.anchoredPosition = new Vector2((buttonWidth + buttonGap) * 0.5f, 54f);
             _createSpaceBtn.onClick.AddListener(() => { if (!_busy) ShowCreateSpace(); });
-            _createSpaceBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
 
             return panel;
         }
 
         private GameObject BuildCreateSpacePanel(Transform parent)
         {
-            var panel = CreatePanel(parent, "CreateSpacePanel");
+            var panel = CreatePanel(parent, "CreateSpacePanel", new Vector2(664f, 434f), new Color(0.607f, 0.509f, 1f, 0.28f));
             panel.SetActive(false);
+            panel.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -10f);
+            var content = CreateInnerFill(panel.transform, "PanelFill", new Vector2(660f, 430f), new Color(0.129f, 0.106f, 0.275f, 0.76f));
 
-            float contentWidth = 500;
-            float inputHeight = 60;
-            float labelHeight = 40;
-            float fontSizeLabel = 28;
-            float buttonHeight = 55;
-            float startY = 80;
-            float gap = 30;
+            float contentWidth = 500f;
+            float inputHeight = 58f;
 
-            // Header
-            var header = CreateText(panel.transform, "创建新空间", 36, FontStyles.Bold);
+            var header = CreateText(content.transform, "创建新空间", 36, FontStyles.Bold);
             var headerRect = header.GetComponent<RectTransform>();
             headerRect.anchorMin = new Vector2(0.5f, 1);
             headerRect.anchorMax = new Vector2(0.5f, 1);
             headerRect.pivot = new Vector2(0.5f, 1);
-            headerRect.sizeDelta = new Vector2(contentWidth, 50);
-            headerRect.anchoredPosition = new Vector2(0, -20);
+            headerRect.sizeDelta = new Vector2(contentWidth, 52f);
+            headerRect.anchoredPosition = new Vector2(0, -38f);
             header.alignment = TextAlignmentOptions.Center;
+            header.color = new Color32(0xF5, 0xD8, 0xFF, 0xFF);
 
-            // Space Name
-            var nameLabel = CreateText(panel.transform, "空间名称（可选）", fontSizeLabel, FontStyles.Normal);
-            var nameLabelRect = nameLabel.rectTransform;
-            nameLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
-            nameLabelRect.anchorMin = new Vector2(0.5f, 1);
-            nameLabelRect.anchorMax = new Vector2(0.5f, 1);
-            nameLabelRect.pivot = new Vector2(0, 1);
-            nameLabelRect.anchoredPosition = new Vector2(-contentWidth / 2, -startY);
-            nameLabel.alignment = TextAlignmentOptions.BottomLeft;
-
-            _spaceNameInput = CreateInput(panel.transform, "My Space");
+            _spaceNameInput = CreateInput(content.transform, "SpaceNameInput", "空间名称（可选）");
             var nameInRt = _spaceNameInput.GetComponent<RectTransform>();
             nameInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
-            PositionRow(nameInRt, y: startY + labelHeight + 10);
+            PositionRow(nameInRt, 100f);
 
-            // Co-owner Username
-            float coOwnerY = startY + labelHeight + inputHeight + gap;
-            var coOwnerLabel = CreateText(panel.transform, "共同拥有者用户名（可选）", fontSizeLabel, FontStyles.Normal);
-            var coOwnerLabelRect = coOwnerLabel.rectTransform;
-            coOwnerLabelRect.sizeDelta = new Vector2(contentWidth, labelHeight);
-            coOwnerLabelRect.anchorMin = new Vector2(0.5f, 1);
-            coOwnerLabelRect.anchorMax = new Vector2(0.5f, 1);
-            coOwnerLabelRect.pivot = new Vector2(0, 1);
-            coOwnerLabelRect.anchoredPosition = new Vector2(-contentWidth / 2, -coOwnerY);
-            coOwnerLabel.alignment = TextAlignmentOptions.BottomLeft;
-
-            _coOwnerUsernameInput = CreateInput(panel.transform, "Enter username to share with");
+            _coOwnerUsernameInput = CreateInput(content.transform, "CoOwnerUsernameInput", "共同拥有者用户名（可选）");
             var coOwnerInRt = _coOwnerUsernameInput.GetComponent<RectTransform>();
             coOwnerInRt.sizeDelta = new Vector2(contentWidth, inputHeight);
-            PositionRow(coOwnerInRt, y: coOwnerY + labelHeight + 10);
+            PositionRow(coOwnerInRt, 184f);
 
-            // Buttons
-            float btnY = coOwnerY + labelHeight + inputHeight + gap * 2;
-
-            _createSpaceSubmitBtn = CreateButton(panel.transform, "创建", new Color(0.30f, 0.70f, 0.45f));
+            _createSpaceSubmitBtn = CreateFilledButton(content.transform, "CreateSpaceSubmitButton", "创建", new Vector2(220f, 62f), new Color(0.914f, 0.545f, 0.847f, 1f), Color.white);
             var submitRt = _createSpaceSubmitBtn.GetComponent<RectTransform>();
-            submitRt.anchorMin = new Vector2(0.5f, 1);
-            submitRt.anchorMax = new Vector2(0.5f, 1);
-            submitRt.pivot = new Vector2(0.5f, 1);
-            submitRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
-            submitRt.anchoredPosition = new Vector2(-contentWidth * 0.24f - 5, -btnY);
+            submitRt.anchorMin = new Vector2(0.5f, 0f);
+            submitRt.anchorMax = new Vector2(0.5f, 0f);
+            submitRt.pivot = new Vector2(0.5f, 0f);
+            submitRt.anchoredPosition = new Vector2(-123f, 48f);
             _createSpaceSubmitBtn.onClick.AddListener(() => { if (!_busy) StartCoroutine(CreateSpace()); });
-            _createSpaceSubmitBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
 
-            _createSpaceBackBtn = CreateButton(panel.transform, "返回", new Color(0.45f, 0.45f, 0.50f));
+            _createSpaceBackBtn = CreateGhostButton(content.transform, "CreateSpaceBackButton", "返回", new Vector2(220f, 62f), new Color(0.607f, 0.509f, 1f, 0.35f), new Color(0.129f, 0.106f, 0.275f, 0.88f), new Color(0.847f, 0.78f, 1f, 1f));
             var backRt = _createSpaceBackBtn.GetComponent<RectTransform>();
-            backRt.anchorMin = new Vector2(0.5f, 1);
-            backRt.anchorMax = new Vector2(0.5f, 1);
-            backRt.pivot = new Vector2(0.5f, 1);
-            backRt.sizeDelta = new Vector2(contentWidth * 0.48f, buttonHeight);
-            backRt.anchoredPosition = new Vector2(contentWidth * 0.24f + 5, -btnY);
+            backRt.anchorMin = new Vector2(0.5f, 0f);
+            backRt.anchorMax = new Vector2(0.5f, 0f);
+            backRt.pivot = new Vector2(0.5f, 0f);
+            backRt.anchoredPosition = new Vector2(123f, 48f);
             _createSpaceBackBtn.onClick.AddListener(() => { if (!_busy) HideCreateSpace(); });
-            _createSpaceBackBtn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
 
             return panel;
         }
@@ -732,6 +715,7 @@ namespace Morphis.AppFlow
             if (_createSpacePanel != null) _createSpacePanel.SetActive(false);
             _selectedWorkspaceId = null;
             _selectedWorkspaceName = null;
+            _selectedWorkspaceButton = null;
             SetCursorForUI(true);
         }
 
@@ -1061,6 +1045,7 @@ namespace Morphis.AppFlow
 
         private void ClearWorkspaceList()
         {
+            _selectedWorkspaceButton = null;
             for (int i = _workspaceListRoot.childCount - 1; i >= 0; i--)
             {
                 Destroy(_workspaceListRoot.GetChild(i).gameObject);
@@ -1119,23 +1104,26 @@ namespace Morphis.AppFlow
 
         private void AddWorkspaceItem(string id, string name)
         {
-            var btn = CreateButton(_workspaceListRoot, name, new Color(0.25f, 0.25f, 0.32f));
+            var btn = CreateFilledButton(_workspaceListRoot, $"WorkspaceItem_{id}", name, new Vector2(0f, 56f), new Color(0.09f, 0.086f, 0.20f, 1f), new Color(0.95f, 0.92f, 1f, 0.95f), false);
             var rt = btn.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(0, 70);
+            rt.sizeDelta = new Vector2(0f, 52f);
             
-            // Override font size
-            btn.GetComponentInChildren<TextMeshProUGUI>().fontSize = 28;
+            var label = btn.GetComponentInChildren<TextMeshProUGUI>();
+            label.fontSize = 24;
+            label.alignment = TextAlignmentOptions.MidlineLeft;
+            label.margin = new Vector4(18f, 0f, 18f, 0f);
             
-            // Add LayoutElement for VerticalLayoutGroup to work properly
             var layoutElement = btn.gameObject.AddComponent<LayoutElement>();
-            layoutElement.minHeight = 70;
-            layoutElement.preferredHeight = 70;
+            layoutElement.minHeight = 52;
+            layoutElement.preferredHeight = 52;
             layoutElement.flexibleWidth = 1;
+            ApplyWorkspaceItemStyle(btn, false);
             
             btn.onClick.AddListener(() =>
             {
                 _selectedWorkspaceId = id;
                 _selectedWorkspaceName = name;
+                HighlightWorkspaceButton(btn);
                 SetStatus($"Selected: {name}");
             });
         }
@@ -1294,24 +1282,176 @@ namespace Morphis.AppFlow
 
         private static void SetCursorForUI(bool uiMode)
         {
-            // Always unlock!
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
 
-        private static GameObject CreatePanel(Transform parent, string name)
+        private void LoadUiResources()
+        {
+            if (_uiFont == null)
+            {
+                _uiFont = Resources.Load<TMP_FontAsset>("Fonts & Materials/NotoSansSC-VariableFont_wght SDF");
+                if (_uiFont == null)
+                {
+                    _uiFont = TMP_Settings.defaultFontAsset;
+                }
+            }
+
+#if UNITY_EDITOR
+            if (loginBackgroundSprite == null)
+            {
+                loginBackgroundSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Game/login/romantic_lakeside_night_under_starry_skies.png");
+            }
+
+            var preferredLantern = LoadPreferredSprite(
+                "Assets/Game/login/magical_lantern_and_glowing_heart_scene_transparent.png",
+                "Assets/Game/login/magical_lantern_and_glowing_heart_scene.png");
+            if (preferredLantern != null)
+            {
+                leftLanternSprite = preferredLantern;
+            }
+
+            var preferredMascot = LoadPreferredSprite(
+                "Assets/Game/login/soft_pastel_cuddle_with_glowing_heart_transparent.png",
+                "Assets/Game/login/soft_pastel_cuddle_with_glowing_heart.png");
+            if (preferredMascot != null)
+            {
+                rightMascotSprite = preferredMascot;
+            }
+
+            var preferredStillLife = LoadPreferredSprite(
+                "Assets/Game/login/magical_cozy_still_life_with_candlelight_transparent.png",
+                "Assets/Game/login/magical_cozy_still_life_with_candlelight.png");
+            if (preferredStillLife != null)
+            {
+                rightStillLifeSprite = preferredStillLife;
+            }
+
+            if (_ambientEffectSprites == null || _ambientEffectSprites.Length == 0)
+            {
+                _ambientEffectSprites = AssetDatabase.LoadAllAssetsAtPath("Assets/Game/login/effects_transparent.png")
+                    .OfType<Sprite>()
+                    .Where(sprite => sprite.rect.width <= 200f && sprite.rect.height <= 200f)
+                    .OrderBy(sprite => sprite.name)
+                    .ToArray();
+            }
+#endif
+        }
+
+        private static Sprite LoadPreferredSprite(string preferredPath, string fallbackPath)
+        {
+#if UNITY_EDITOR
+            var preferred = AssetDatabase.LoadAssetAtPath<Sprite>(preferredPath);
+            if (preferred != null)
+            {
+                return preferred;
+            }
+
+            return AssetDatabase.LoadAssetAtPath<Sprite>(fallbackPath);
+#else
+            return null;
+#endif
+        }
+
+        private void CreateDecorationImage(Transform parent, string name, Sprite sprite, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 size, Vector2 position)
+        {
+            if (sprite == null) return;
+
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = anchorMin;
+            rt.anchorMax = anchorMax;
+            rt.pivot = pivot;
+            rt.anchoredPosition = position;
+
+            var image = go.AddComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+            image.color = new Color(1f, 1f, 1f, 0.94f);
+            image.raycastTarget = false;
+
+            if (size.x > 0f)
+            {
+                float height = size.x * sprite.rect.height / sprite.rect.width;
+                rt.sizeDelta = new Vector2(size.x, height);
+            }
+            else if (size.y > 0f)
+            {
+                float width = size.y * sprite.rect.width / sprite.rect.height;
+                rt.sizeDelta = new Vector2(width, size.y);
+            }
+            else
+            {
+                rt.sizeDelta = sprite.rect.size;
+            }
+        }
+
+        private void CreateAmbientEffects(Transform parent)
+        {
+            if (_ambientEffectSprites == null || _ambientEffectSprites.Length == 0)
+            {
+                return;
+            }
+
+            CreateAmbientEffect(parent, "EffectTitleLeft", _ambientEffectSprites[0], new Vector2(0.5f, 1f), new Vector2(-286f, -112f), 26f, new Color(1f, 0.88f, 0.98f, 0.26f), 0f);
+            CreateAmbientEffect(parent, "EffectTitleRight", _ambientEffectSprites[Mathf.Min(1, _ambientEffectSprites.Length - 1)], new Vector2(0.5f, 1f), new Vector2(318f, -180f), 22f, new Color(0.92f, 0.85f, 1f, 0.22f), 0.8f);
+            CreateAmbientEffect(parent, "EffectCardLeft", _ambientEffectSprites[Mathf.Min(2, _ambientEffectSprites.Length - 1)], new Vector2(0.5f, 0.5f), new Vector2(-344f, -4f), 18f, new Color(1f, 0.84f, 0.95f, 0.18f), 1.5f);
+            CreateAmbientEffect(parent, "EffectCardRight", _ambientEffectSprites[Mathf.Min(3, _ambientEffectSprites.Length - 1)], new Vector2(0.5f, 0.5f), new Vector2(352f, 84f), 20f, new Color(0.9f, 0.84f, 1f, 0.18f), 2.1f);
+        }
+
+        private void CreateAmbientEffect(Transform parent, string name, Sprite sprite, Vector2 anchor, Vector2 position, float width, Color color, float phaseOffset)
+        {
+            if (sprite == null) return;
+
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = anchor;
+            rt.anchorMax = anchor;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = position;
+            rt.sizeDelta = new Vector2(width, width * sprite.rect.height / sprite.rect.width);
+
+            var image = go.AddComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+            image.color = color;
+            image.raycastTarget = false;
+
+            var pulse = go.AddComponent<AmbientPulse>();
+            pulse.Initialize(image, rt, phaseOffset);
+        }
+
+        private GameObject CreatePanel(Transform parent, string name, Vector2 size, Color color)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             var rt = go.AddComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0, 0);
-            rt.anchorMax = new Vector2(1, 1);
-            rt.offsetMin = new Vector2(10, 80);
-            rt.offsetMax = new Vector2(-10, -80);
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = Vector2.zero;
 
             var img = go.AddComponent<Image>();
-            img.color = new Color(0.10f, 0.10f, 0.14f, 0.9f);
+            img.color = color;
+            return go;
+        }
 
+        private GameObject CreateInnerFill(Transform parent, string name, Vector2 size, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = Vector2.zero;
+
+            var image = go.AddComponent<Image>();
+            image.color = color;
             return go;
         }
 
@@ -1321,39 +1461,48 @@ namespace Morphis.AppFlow
             go.transform.SetParent(parent, false);
             var tmp = go.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
+            if (_uiFont != null)
+            {
+                tmp.font = _uiFont;
+            }
             tmp.fontSize = size;
             tmp.fontStyle = style;
             tmp.color = Color.white;
+            tmp.enableWordWrapping = false;
+            tmp.richText = false;
             return tmp;
         }
 
-        private TMP_InputField CreateInput(Transform parent, string placeholder, bool isPassword = false)
+        private TMP_InputField CreateInput(Transform parent, string name, string placeholder, bool isPassword = false)
         {
-            var go = new GameObject("InputField");
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
-            go.SetActive(true); // 确保激活
+            go.SetActive(true);
             
             var rt = go.AddComponent<RectTransform>();
             rt.anchorMin = new Vector2(0.5f, 1);
             rt.anchorMax = new Vector2(0.5f, 1);
             rt.pivot = new Vector2(0.5f, 1);
-            rt.sizeDelta = new Vector2(420, 44);
+            rt.sizeDelta = new Vector2(420, 72);
 
             var img = go.AddComponent<Image>();
-            img.color = new Color(0.14f, 0.14f, 0.18f, 1f);
-            img.raycastTarget = true; // 确保可以接收射线
+            img.color = new Color(0.09f, 0.086f, 0.20f, 0.85f);
+            img.raycastTarget = true;
 
             var input = go.AddComponent<TMP_InputField>();
-            input.interactable = true; // 确保可交互
+            input.interactable = true;
             input.enabled = true;
+            input.customCaretColor = true;
+            input.caretColor = new Color(1f, 0.82f, 0.94f, 0.95f);
+            input.selectionColor = new Color(0.86f, 0.68f, 1f, 0.30f);
 
             var textArea = new GameObject("TextArea");
             textArea.transform.SetParent(go.transform, false);
             var textAreaRT = textArea.AddComponent<RectTransform>();
             textAreaRT.anchorMin = new Vector2(0, 0);
             textAreaRT.anchorMax = new Vector2(1, 1);
-            textAreaRT.offsetMin = new Vector2(12, 6);
-            textAreaRT.offsetMax = new Vector2(-12, -6);
+            textAreaRT.offsetMin = new Vector2(18, 8);
+            textAreaRT.offsetMax = new Vector2(-18, -8);
             textArea.AddComponent<RectMask2D>();
 
             var textGO = new GameObject("Text");
@@ -1361,15 +1510,19 @@ namespace Morphis.AppFlow
             var textRT = textGO.AddComponent<RectTransform>();
             Stretch(textRT);
             var text = textGO.AddComponent<TextMeshProUGUI>();
-            text.fontSize = 36; // Big!
+            if (_uiFont != null)
+            {
+                text.font = _uiFont;
+            }
+            text.fontSize = 30;
             text.color = Color.white;
             text.alignment = TextAlignmentOptions.MidlineLeft;
-            text.raycastTarget = false; // 文本不需要接收射线
+            text.raycastTarget = false;
+            text.enableWordWrapping = false;
             
             input.textComponent = text;
             input.textViewport = textAreaRT;
 
-            // Placeholder
             if (!string.IsNullOrEmpty(placeholder))
             {
                 var phGO = new GameObject("Placeholder");
@@ -1377,37 +1530,47 @@ namespace Morphis.AppFlow
                 var phRT = phGO.AddComponent<RectTransform>();
                 Stretch(phRT);
                 var phText = phGO.AddComponent<TextMeshProUGUI>();
+                if (_uiFont != null)
+                {
+                    phText.font = _uiFont;
+                }
                 phText.text = placeholder;
-                phText.fontSize = 36; // Big!
-                phText.color = new Color(1f, 1f, 1f, 0.5f);
-                phText.fontStyle = FontStyles.Italic;
+                phText.fontSize = 28;
+                phText.color = new Color(0.717f, 0.682f, 0.847f, 1f);
+                phText.fontStyle = FontStyles.Normal;
                 phText.alignment = TextAlignmentOptions.MidlineLeft;
                 phText.raycastTarget = false;
+                phText.enableWordWrapping = false;
                 input.placeholder = phText;
             }
 
             input.textViewport = textAreaRT;
             input.textComponent = text;
             input.contentType = isPassword ? TMP_InputField.ContentType.Password : TMP_InputField.ContentType.Standard;
-            input.characterLimit = 0; // 无限制
-            input.readOnly = false; // 确保可编辑
-
-            Debug.Log($"[BootFlow] Created InputField: interactable={input.interactable}, enabled={input.enabled}, readOnly={input.readOnly}");
-
+            input.characterLimit = 0;
+            input.readOnly = false;
             return input;
         }
 
-        private Button CreateButton(Transform parent, string text, Color color)
+        private Button CreateFilledButton(Transform parent, string name, string text, Vector2 size, Color normalColor, Color textColor, bool addColorState = true)
         {
-            var go = new GameObject($"Button_{text}");
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             var rt = go.AddComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(200, 44);
+            rt.sizeDelta = size;
 
             var img = go.AddComponent<Image>();
-            img.color = color;
+            img.color = normalColor;
 
             var btn = go.AddComponent<Button>();
+            if (addColorState)
+            {
+                ConfigureButtonColors(btn, normalColor);
+            }
+            else
+            {
+                btn.transition = Selectable.Transition.None;
+            }
 
             var label = new GameObject("Label");
             label.transform.SetParent(go.transform, false);
@@ -1415,14 +1578,37 @@ namespace Morphis.AppFlow
             Stretch(labelRT);
 
             var tmp = label.AddComponent<TextMeshProUGUI>();
+            if (_uiFont != null)
+            {
+                tmp.font = _uiFont;
+            }
             tmp.text = text;
-            tmp.fontSize = 16;
+            tmp.fontSize = 30;
             tmp.fontStyle = FontStyles.Bold;
-            tmp.color = Color.white;
+            tmp.color = textColor;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.raycastTarget = false;
 
             return btn;
+        }
+
+        private Button CreateGhostButton(Transform parent, string name, string text, Vector2 size, Color borderColor, Color fillColor, Color textColor)
+        {
+            var button = CreateFilledButton(parent, name, text, size, borderColor, textColor);
+            var rt = button.GetComponent<RectTransform>();
+
+            var fill = new GameObject("Fill");
+            fill.transform.SetParent(button.transform, false);
+            fill.transform.SetAsFirstSibling();
+            var fillRect = fill.AddComponent<RectTransform>();
+            Stretch(fillRect);
+            fillRect.offsetMin = new Vector2(2f, 2f);
+            fillRect.offsetMax = new Vector2(-2f, -2f);
+            var fillImage = fill.AddComponent<Image>();
+            fillImage.color = fillColor;
+            fillImage.raycastTarget = false;
+
+            return button;
         }
 
         private static void PositionRow(RectTransform rt, float y)
@@ -1433,21 +1619,131 @@ namespace Morphis.AppFlow
             rt.anchoredPosition = new Vector2(0, -y);
         }
 
-        private static void PositionHalf(RectTransform rt, bool left, float y)
-        {
-            rt.anchorMin = new Vector2(0.5f, 1);
-            rt.anchorMax = new Vector2(0.5f, 1);
-            rt.pivot = new Vector2(0.5f, 1);
-            rt.sizeDelta = new Vector2(200, 44);
-            rt.anchoredPosition = new Vector2(left ? -110 : 110, -y);
-        }
-
         private static void Stretch(RectTransform rt)
         {
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
             rt.offsetMin = Vector2.zero;
             rt.offsetMax = Vector2.zero;
+        }
+
+        private static void ConfigureButtonColors(Button btn, Color normalColor)
+        {
+            var colors = btn.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = Color.white;
+            colors.pressedColor = Color.white;
+            colors.selectedColor = Color.white;
+            colors.disabledColor = new Color(1f, 1f, 1f, 0.45f);
+            btn.colors = colors;
+
+            var state = btn.gameObject.AddComponent<ButtonColorState>();
+            state.Initialize(normalColor);
+        }
+
+        private void ApplyWorkspaceItemStyle(Button btn, bool selected)
+        {
+            var img = btn.GetComponent<Image>();
+            var label = btn.GetComponentInChildren<TextMeshProUGUI>();
+            if (img != null)
+            {
+                img.color = selected
+                    ? new Color(0.33f, 0.23f, 0.56f, 1f)
+                    : new Color(0.09f, 0.086f, 0.20f, 1f);
+            }
+
+            if (label != null)
+            {
+                label.color = selected
+                    ? new Color(1f, 0.97f, 1f, 1f)
+                    : new Color(0.95f, 0.92f, 1f, 0.95f);
+            }
+        }
+
+        private void HighlightWorkspaceButton(Button btn)
+        {
+            if (_selectedWorkspaceButton != null && _selectedWorkspaceButton != btn)
+            {
+                ApplyWorkspaceItemStyle(_selectedWorkspaceButton, false);
+            }
+
+            _selectedWorkspaceButton = btn;
+            ApplyWorkspaceItemStyle(btn, true);
+        }
+
+        private sealed class ButtonColorState : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
+        {
+            private Image _image;
+            private Color _normalColor;
+            private Color _hoverColor;
+            private Color _pressedColor;
+            private bool _isPointerInside;
+
+            public void Initialize(Color normalColor)
+            {
+                _image = GetComponent<Image>();
+                _normalColor = normalColor;
+                _hoverColor = Color.Lerp(normalColor, Color.white, 0.08f);
+                _pressedColor = Color.Lerp(normalColor, Color.black, 0.10f);
+                if (_image != null)
+                {
+                    _image.color = _normalColor;
+                }
+            }
+
+            public void OnPointerEnter(PointerEventData eventData)
+            {
+                _isPointerInside = true;
+                if (_image != null) _image.color = _hoverColor;
+            }
+
+            public void OnPointerExit(PointerEventData eventData)
+            {
+                _isPointerInside = false;
+                if (_image != null) _image.color = _normalColor;
+            }
+
+            public void OnPointerDown(PointerEventData eventData)
+            {
+                if (_image != null) _image.color = _pressedColor;
+            }
+
+            public void OnPointerUp(PointerEventData eventData)
+            {
+                if (_image != null) _image.color = _isPointerInside ? _hoverColor : _normalColor;
+            }
+        }
+
+        private sealed class AmbientPulse : MonoBehaviour
+        {
+            private Image _image;
+            private RectTransform _rectTransform;
+            private Color _baseColor;
+            private Vector2 _baseSize;
+            private float _phaseOffset;
+
+            public void Initialize(Image image, RectTransform rectTransform, float phaseOffset)
+            {
+                _image = image;
+                _rectTransform = rectTransform;
+                _baseColor = image.color;
+                _baseSize = rectTransform.sizeDelta;
+                _phaseOffset = phaseOffset;
+            }
+
+            private void Update()
+            {
+                if (_image == null || _rectTransform == null)
+                {
+                    return;
+                }
+
+                float t = (Mathf.Sin(Time.unscaledTime * 1.2f + _phaseOffset) + 1f) * 0.5f;
+                var color = _baseColor;
+                color.a = Mathf.Lerp(_baseColor.a * 0.68f, _baseColor.a, t);
+                _image.color = color;
+                _rectTransform.sizeDelta = _baseSize * Mathf.Lerp(0.94f, 1.04f, t);
+            }
         }
 
         private static bool TryParseAuth(string json, out string token, out string username)

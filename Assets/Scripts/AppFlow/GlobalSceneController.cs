@@ -85,6 +85,14 @@ namespace Morphis.AppFlow
             _exitDialogVisible = true;
         }
 
+        public void ToggleExitDialogFromUi()
+        {
+            if (SceneManager.GetActiveScene().name == mainSceneName)
+            {
+                ToggleExitDialog();
+            }
+        }
+
         private GameObject CreateExitDialogCanvas()
         {
             var canvasGO = new GameObject("ExitDialogCanvas");

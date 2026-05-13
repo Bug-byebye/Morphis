@@ -39,6 +39,7 @@ namespace Morphis.Chat
         private TextMeshProUGUI toggleButtonText;
         private bool isOpen;
         private bool isAvailable;
+        private bool hideToggleButton;
         private Coroutine panelAnimationCoroutine;
         private Vector2 panelShownPosition;
         private Vector2 panelHiddenPosition;
@@ -77,6 +78,12 @@ namespace Morphis.Chat
         {
             if (isOpen) Close();
             else Open();
+        }
+
+        public void SetToggleButtonVisible(bool visible)
+        {
+            hideToggleButton = !visible;
+            UpdateToggleButtonVisibility();
         }
 
         public void Open()
@@ -133,10 +140,7 @@ namespace Morphis.Chat
 
             isAvailable = shouldBeAvailable;
 
-            if (toggleButton != null)
-            {
-                toggleButton.gameObject.SetActive(isAvailable);
-            }
+            UpdateToggleButtonVisibility();
 
             if (!isAvailable)
             {
@@ -155,6 +159,14 @@ namespace Morphis.Chat
             }
 
             UpdateToggleButtonLabel();
+        }
+
+        private void UpdateToggleButtonVisibility()
+        {
+            if (toggleButton != null)
+            {
+                toggleButton.gameObject.SetActive(isAvailable && !hideToggleButton);
+            }
         }
 
         private static bool CanUseHumanChatUi()

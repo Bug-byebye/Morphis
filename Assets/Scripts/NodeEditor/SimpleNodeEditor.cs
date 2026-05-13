@@ -68,11 +68,13 @@ namespace AIPipeline.UI
 
         [Header("Main UI")]
         [SerializeField] private GameObject mainUICanvas;
+        private bool _launcherVisible = true;
 
         // private Button openEditorButton; // Removed serialized field to prevent dupes
         // private TextMeshProUGUI openEditorButtonText; // Removed serialized field
         private Button workflowStationButton; 
         private TextMeshProUGUI workflowStationButtonText;
+        private Coroutine quickGenerationCoroutine;
         
         // 连接模式
         private bool isConnecting = false;
@@ -85,6 +87,7 @@ namespace AIPipeline.UI
         
         // Singleton Implementation
         public static SimpleNodeEditor Instance { get; private set; }
+        public bool IsBusy => quickGenerationCoroutine != null;
 
         private void Awake()
         {
@@ -209,6 +212,15 @@ namespace AIPipeline.UI
             txtRt.anchorMax = Vector2.one;
             txtRt.sizeDelta = Vector2.zero;
         }
+
+        public void SetLauncherVisible(bool visible)
+        {
+            _launcherVisible = visible;
+            if (mainUICanvas != null)
+            {
+                mainUICanvas.SetActive(visible);
+            }
+        }
         
         void Update()
         {
@@ -297,6 +309,96 @@ namespace AIPipeline.UI
             }
             
             editorRoot.SetActive(isVisible);
+        }
+
+        public void GenerateTextTo3DQuick(string prompt, System.Action<string> onProgress, System.Action<bool, string> onComplete)
+        {
+            if (quickGenerationCoroutine != null)
+            {
+                onComplete?.Invoke(false, "工作台正在处理中，请稍候。");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                onComplete?.Invoke(false, "请输入要生成 3D 的文字描述。");
+                return;
+            }
+
+            quickGenerationCoroutine = StartCoroutine(GenerateTextTo3DQuickCoroutine(prompt.Trim(), onProgress, onComplete));
+        }
+
+        public void GenerateImageTo3DQuick(byte[] imageData, string imageName, System.Action<string> onProgress, System.Action<bool, string> onComplete)
+        {
+            if (quickGenerationCoroutine != null)
+            {
+                onComplete?.Invoke(false, "工作台正在处理中，请稍候。");
+                return;
+            }
+
+            if (imageData == null || imageData.Length == 0)
+            {
+                onComplete?.Invoke(false, "请先选择一张图片。");
+                return;
+            }
+
+            quickGenerationCoroutine = StartCoroutine(GenerateImageTo3DQuickCoroutine(imageData, imageName, onProgress, onComplete));
+        }
+
+        private System.Collections.IEnumerator GenerateTextTo3DQuickCoroutine(string prompt, System.Action<string> onProgress, System.Action<bool, string> onComplete)
+        {
+            byte[] glbData = null;
+            bool placedSuccessfully = false;
+
+            ReportQuickProgress("正在根据文字生成 3D 模型...", onProgress);
+            yield return CallText23D(prompt, result => glbData = result);
+
+            if (glbData == null || glbData.Length == 0)
+            {
+                ReportQuickComplete(false, "文生 3D 失败，请检查后端服务或稍后重试。", onComplete);
+                quickGenerationCoroutine = null;
+                yield break;
+            }
+
+            ReportQuickProgress("3D 模型已生成，正在放置到场景...", onProgress);
+            yield return PlaceGeneratedModelCoroutine(glbData, success => placedSuccessfully = success);
+
+            ReportQuickComplete(placedSuccessfully, placedSuccessfully ? "文生 3D 已完成，并已放置到场景中。" : "模型生成成功，但放置到场景失败。", onComplete);
+            quickGenerationCoroutine = null;
+        }
+
+        private System.Collections.IEnumerator GenerateImageTo3DQuickCoroutine(byte[] imageData, string imageName, System.Action<string> onProgress, System.Action<bool, string> onComplete)
+        {
+            byte[] glbData = null;
+            bool placedSuccessfully = false;
+
+            ReportQuickProgress($"正在将图片转换为 3D 模型: {imageName}", onProgress);
+            yield return CallImage23D(imageData, result => glbData = result);
+
+            if (glbData == null || glbData.Length == 0)
+            {
+                ReportQuickComplete(false, "图生 3D 失败，请检查后端服务或稍后重试。", onComplete);
+                quickGenerationCoroutine = null;
+                yield break;
+            }
+
+            ReportQuickProgress("3D 模型已生成，正在放置到场景...", onProgress);
+            yield return PlaceGeneratedModelCoroutine(glbData, success => placedSuccessfully = success);
+
+            ReportQuickComplete(placedSuccessfully, placedSuccessfully ? "图生 3D 已完成，并已放置到场景中。" : "模型生成成功，但放置到场景失败。", onComplete);
+            quickGenerationCoroutine = null;
+        }
+
+        private void ReportQuickProgress(string message, System.Action<string> onProgress)
+        {
+            UpdateStatus(message);
+            onProgress?.Invoke(message);
+        }
+
+        private void ReportQuickComplete(bool success, string message, System.Action<bool, string> onComplete)
+        {
+            UpdateStatus(message);
+            onComplete?.Invoke(success, message);
         }
         
         // 鼠标交互模式
@@ -1849,7 +1951,7 @@ namespace AIPipeline.UI
         
         private System.Collections.IEnumerator CallText23D(string prompt, System.Action<byte[]> onComplete)
         {
-            string jsonBody = $"{{\"prompt\": \"{prompt}\"}}";
+            string jsonBody = $"{{\"prompt\": \"{EscapeJson(prompt)}\"}}";
             byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonBody);
             
             using (var request = new UnityEngine.Networking.UnityWebRequest(Text23DUrl, "POST"))
@@ -2145,72 +2247,96 @@ namespace AIPipeline.UI
         
         private System.Collections.IEnumerator PlaceModelFromNodeCoroutine(NodeData previewNode)
         {
+            if (previewNode?.cachedModelData == null || previewNode.cachedModelData.Length == 0)
+            {
+                yield break;
+            }
+
+            yield return PlaceGeneratedModelCoroutine(previewNode.cachedModelData);
+        }
+
+        private System.Collections.IEnumerator PlaceGeneratedModelCoroutine(byte[] glbData, System.Action<bool> onComplete = null)
+        {
+            if (glbData == null || glbData.Length == 0)
+            {
+                onComplete?.Invoke(false);
+                yield break;
+            }
+
             var gltf = new GLTFast.GltfImport();
-            var loadTask = gltf.LoadGltfBinary(previewNode.cachedModelData);
+            var loadTask = gltf.LoadGltfBinary(glbData);
             while (!loadTask.IsCompleted) yield return null;
-            
-            if (!loadTask.Result) yield break;
-            
+
+            if (!loadTask.Result)
+            {
+                UpdateStatus("Failed to load generated model");
+                onComplete?.Invoke(false);
+                yield break;
+            }
+
             Vector3 spawnPos = Camera.main.transform.position + Camera.main.transform.forward * 3f;
-            spawnPos.y = 0; // 放在地面上
-            
+            spawnPos.y = 0;
+
             GameObject modelObj = new GameObject("GeneratedModel_" + System.DateTime.Now.Ticks);
             modelObj.transform.position = spawnPos;
-            
+
             var instTask = gltf.InstantiateMainSceneAsync(modelObj.transform);
             while (!instTask.IsCompleted) yield return null;
-            
-            // 计算边界并调整缩放
+
+            if (!instTask.Result)
+            {
+                UpdateStatus("Failed to instantiate generated model");
+                Destroy(modelObj);
+                onComplete?.Invoke(false);
+                yield break;
+            }
+
             Bounds bounds = CalculateBounds(modelObj);
             float maxSize = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
             if (maxSize > 0)
             {
-                float targetSize = 1.5f; // 目标大小（米）
+                float targetSize = 1.5f;
                 float scale = targetSize / maxSize;
                 modelObj.transform.localScale = Vector3.one * scale;
             }
-            
-            // 重新计算边界并居中到地面
+
             bounds = CalculateBounds(modelObj);
             modelObj.transform.position = new Vector3(spawnPos.x, -bounds.min.y, spawnPos.z);
-            
-            // 使用 BoxCollider 代替慢的 MeshCollider
+
             BoxCollider boxCollider = modelObj.AddComponent<BoxCollider>();
             boxCollider.center = bounds.center - modelObj.transform.position;
             boxCollider.size = bounds.size;
-            
-            // 添加刚体（设为 Kinematic 避免物理计算）
+
             Rigidbody rb = modelObj.AddComponent<Rigidbody>();
             rb.mass = 1f;
             rb.useGravity = false;
-            rb.isKinematic = true; // 不参与物理模拟，但可以接收点击
-            
-            // 添加交互组件 - 支持留言和光晕
-            InteractableObject interactable = modelObj.AddComponent<InteractableObject>();
+            rb.isKinematic = true;
+
+            modelObj.AddComponent<InteractableObject>();
             Debug.Log($"[Interaction] Added InteractableObject to {modelObj.name}");
-            
-            // 确保场景中有 ObjectInteractionManager
+
             EnsureInteractionManager();
-            
-            // 保存模型文件到 Assets/Resources/Placeables
+
             string resourcesPath = Application.dataPath + "/Resources/Placeables";
             if (!System.IO.Directory.Exists(resourcesPath))
             {
                 System.IO.Directory.CreateDirectory(resourcesPath);
             }
+
             string filename = $"generated_{System.DateTime.Now.Ticks}.glb";
             string fullPath = System.IO.Path.Combine(resourcesPath, filename);
-            try 
+            try
             {
-                System.IO.File.WriteAllBytes(fullPath, previewNode.cachedModelData);
+                System.IO.File.WriteAllBytes(fullPath, glbData);
                 Debug.Log($"[NodeEditor] Saved generated model to: {fullPath}");
             }
             catch (System.Exception e)
             {
                 Debug.LogError($"[NodeEditor] Failed to save model file: {e.Message}");
             }
-            
+
             UpdateStatus($"Model placed at {modelObj.transform.position}");
+            onComplete?.Invoke(true);
         }
         
         /// <summary>

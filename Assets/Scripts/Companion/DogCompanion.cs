@@ -55,6 +55,7 @@ namespace Morphis.Companion
         private float _commandActionEndTime;
         private int _commandActionAnimId = -1;
         private static readonly int AnimationIDHash = Animator.StringToHash("AnimationID");
+        public string DogName => dogName;
 
         private void Awake()
         {
@@ -177,6 +178,22 @@ namespace Morphis.Companion
                 {
                     _chatUI.Open();
                 }
+            }
+        }
+
+        public void OpenChatPanel()
+        {
+            if (_chatUI != null)
+            {
+                _chatUI.Open();
+            }
+        }
+
+        public void ToggleChatPanel()
+        {
+            if (_chatUI != null)
+            {
+                _chatUI.Toggle();
             }
         }
 
