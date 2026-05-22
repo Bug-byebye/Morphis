@@ -34,7 +34,10 @@ namespace Morphis.AppFlow
         private void Awake()
         {
             DontDestroyOnLoad(gameObject);
-            EnsureEventSystem();
+            // 不在此处 EnsureEventSystem：BeforeSceneLoad 阶段场景尚未加载，
+            // FindFirstObjectByType 会为 false，会创建一个 DontDestroyOnLoad 的 EventSystem，
+            // 随后 MainScene 等场景自带的 UI_EventSystem 载入后就会出现「两个 EventSystem」警告。
+            // 仅在真正需要自建退出对话框 UI 时再按需创建（见 CreateExitDialogCanvas）。
         }
 
         private void Update()
@@ -95,6 +98,8 @@ namespace Morphis.AppFlow
 
         private GameObject CreateExitDialogCanvas()
         {
+            EnsureEventSystem();
+
             var canvasGO = new GameObject("ExitDialogCanvas");
             var canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -240,7 +245,8 @@ namespace Morphis.AppFlow
         private void OnConfirmQuitClicked()
         {
             OnSaveClicked();
-
+            // 不要立刻 Quit：让 OnApplicationQuit 里的同步 SaveToServerBlocking 跑完。
+            // OnSaveClicked 触发的是异步协程，可能尚未发出 HTTP；直接 Quit 会丢这次保存。
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
 #else

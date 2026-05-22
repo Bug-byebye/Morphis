@@ -154,12 +154,18 @@ namespace Morphis.WorldSnapshot
             var worldId = GetCurrentWorldId();
             if (string.IsNullOrEmpty(worldId)) return;
 
-            // 联机模式：保存由服务器权威执行（客户端只可发起请求）
-            if (NetworkClient.active || NetworkServer.active)
+            // 联机服务器：在 Unity Server 进程退出前同步刷盘权威快照（双保险，主入口见 NetworkPlayerSetup）
+            if (NetworkServer.active)
+            {
+                StarterAssets.NetworkPlayerSetup.FlushAuthoritySaveBlocking("OnApplicationQuit");
+                return;
+            }
+            // 联机客户端：保存由服务器权威执行，客户端退出无需写盘
+            if (NetworkClient.active)
             {
                 return;
             }
-            // 仅保存到数据库：已登录时只写服务器，不写本地；未登录不持久化
+            // 单机/未联机：仅在已登录时同步写一次后端
             if (AppSession.IsLoggedIn)
             {
                 SaveWorldServer(worldId, onError: e => Debug.LogWarning($"[WorldSnapshotManager] Save to server on quit failed: {e}"));

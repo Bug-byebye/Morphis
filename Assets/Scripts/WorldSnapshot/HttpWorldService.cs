@@ -263,6 +263,71 @@ namespace Morphis.WorldSnapshot
         }
 
         /// <summary>
+        /// 同步保存世界快照（阻塞主线程，仅用于 OnApplicationQuit / OnStopServer 等无法等待协程的场合）。
+        /// 返回 true 表示已被服务器成功接收（HTTP 2xx）。
+        /// </summary>
+        public bool SaveToServerBlocking(WorldSnapshot snapshot, float timeoutSeconds = 5f, Action<string> onError = null)
+        {
+            if (snapshot == null)
+            {
+                onError?.Invoke("Snapshot is null");
+                return false;
+            }
+            if (string.IsNullOrEmpty(snapshot.world_id))
+            {
+                onError?.Invoke("world_id is null or empty");
+                return false;
+            }
+
+            var url = GetWorldUrl(snapshot.world_id);
+            var json = JsonUtility.ToJson(snapshot, prettyPrint: false);
+            var bodyRaw = Encoding.UTF8.GetBytes(json);
+
+            Debug.Log($"[HttpWorldService] (sync) POST {url} objects={snapshot.objects?.Count ?? 0}");
+
+            using (var req = new UnityWebRequest(url, "POST"))
+            {
+                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type", "application/json");
+
+                if (IsAppSessionLoggedIn())
+                {
+                    var token = GetAppSessionToken();
+                    if (!string.IsNullOrEmpty(token))
+                        req.SetRequestHeader("Authorization", $"Bearer {token}");
+                }
+
+                var op = req.SendWebRequest();
+                var start = DateTime.UtcNow;
+                while (!op.isDone)
+                {
+                    if ((DateTime.UtcNow - start).TotalSeconds > timeoutSeconds)
+                    {
+                        var err = $"Timeout after {timeoutSeconds:F1}s";
+                        Debug.LogWarning($"[HttpWorldService] (sync) {err}");
+                        onError?.Invoke(err);
+                        return false;
+                    }
+                    System.Threading.Thread.Sleep(10);
+                }
+
+                if (req.result != UnityWebRequest.Result.Success || req.responseCode >= 400)
+                {
+                    var err = req.result != UnityWebRequest.Result.Success
+                        ? $"Network error: {req.error}"
+                        : $"HTTP {req.responseCode}: {req.downloadHandler.text}";
+                    Debug.LogError($"[HttpWorldService] (sync) {err}");
+                    onError?.Invoke(err);
+                    return false;
+                }
+
+                Debug.Log($"[HttpWorldService] (sync) Saved world '{snapshot.world_id}'");
+                return true;
+            }
+        }
+
+        /// <summary>
         /// 静态便捷方法：获取或创建 HttpWorldService 实例
         /// </summary>
         public static HttpWorldService GetOrCreate()

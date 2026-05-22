@@ -37,6 +37,7 @@ namespace StarterAssets
         private static readonly Dictionary<string, GameObject> _clientObjects = new Dictionary<string, GameObject>();
         private static Coroutine _serverAutosaveCoroutine;
         private static HttpWorldService _serverAutosaveHost;
+        private static bool _quittingHookInstalled;
 
         public static NetworkPlayerSetup Local { get; private set; }
 
@@ -85,6 +86,9 @@ namespace StarterAssets
         {
             base.OnStartServer();
 
+            // 进程退出（idle cleanup SIGTERM / 手动 kill）前同步刷盘，避免 ScheduleServerAutosave 协程被丢弃
+            EnsureServerQuitFlushHook();
+
             // 每个玩家对象都会跑到这里：用于给新加入的客户端下发当前世界快照
             if (_serverWorldLoaded)
             {
@@ -97,6 +101,49 @@ namespace StarterAssets
                 // 首次启动：由服务器拉取一次数据库快照，并广播给所有客户端
                 StartCoroutine(LoadWorldOnceOnServer());
             }
+        }
+
+        public override void OnStopServer()
+        {
+            base.OnStopServer();
+            // 玩家断连：如果是最后一个，立即同步刷盘，避免空闲 cleanup 杀进程时丢失最后一次编辑。
+            // NetworkServer.connections 在 OnStopServer 触发时仍包含当前断开的连接，故判 <= 1。
+            if (NetworkServer.active && NetworkServer.connections.Count <= 1)
+            {
+                FlushAuthoritySaveBlocking("LastClientDisconnect");
+            }
+        }
+
+        private static void EnsureServerQuitFlushHook()
+        {
+            if (_quittingHookInstalled) return;
+            _quittingHookInstalled = true;
+            Application.quitting += () => FlushAuthoritySaveBlocking("Application.quitting");
+        }
+
+        /// <summary>
+        /// 服务器：把当前权威快照同步写入 backend。
+        /// 退出/断连前调用，确保最后一次编辑不会因协程被丢弃而丢失。
+        /// </summary>
+        public static void FlushAuthoritySaveBlocking(string reason)
+        {
+            if (!NetworkServer.active) return;
+            if (!_serverWorldLoaded) return;
+            if (string.IsNullOrEmpty(_serverWorldId)) return;
+
+            // 取消 pending 的异步协程，避免重复写
+            if (_serverAutosaveCoroutine != null && _serverAutosaveHost != null)
+            {
+                _serverAutosaveHost.StopCoroutine(_serverAutosaveCoroutine);
+                _serverAutosaveCoroutine = null;
+            }
+
+            var snapshot = BuildSnapshotFromAuthority();
+            var http = HttpWorldService.GetOrCreate();
+            bool ok = http.SaveToServerBlocking(snapshot,
+                onError: e => Debug.LogWarning($"[WorldAuthority] Flush({reason}) failed: {e}"));
+            if (ok)
+                Debug.Log($"[WorldAuthority] Flush({reason}) saved world '{snapshot.world_id}' (v{snapshot.version}, objects={snapshot.objects.Count})");
         }
 
         public override void OnStartLocalPlayer()

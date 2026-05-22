@@ -1,6 +1,6 @@
 {
-  "ApiBaseUrl": "http://35.232.83.9:8000",
-  "PublicGameServerAddress": "35.232.83.9",
+  "ApiBaseUrl": "http://47.86.171.174:8000",
+  "PublicGameServerAddress": "47.86.171.174",
   "ServerListenAddress": "0.0.0.0",
   "ServerPort": 7777,
   "DefaultWorldId": "default-world",
