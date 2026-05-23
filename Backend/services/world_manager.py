@@ -3,7 +3,6 @@ World 进程管理器：负责动态启动/停止 Unity Server 进程
 """
 import os
 import subprocess
-import signal
 import time
 import psutil
 from pathlib import Path
@@ -12,7 +11,14 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from models.world import World, WorldStatus
 from database import SessionLocal
-from config import get_api_base_url, get_unity_server_config
+from config import (
+    get_api_base_url,
+    get_unity_server_executable,
+    get_unity_server_root,
+    get_unity_server_log_directory,
+    get_unity_server_config,
+    ensure_unity_server_runtime_config,
+)
 import threading
 import logging
 
@@ -24,9 +30,7 @@ class WorldProcessManager:
     """
     World 进程管理器（单例）
     - 动态启动/停止 Unity Server 进程
-    - 端口分配
-    - 进程健康检查
-    - 自动清理空闲 World
+    - MorphisServer 与 Morphis 仓库分离部署，通过配置指向独立目录
     """
     
     _instance = None
@@ -49,28 +53,55 @@ class WorldProcessManager:
         self.base_port = int(unity_cfg.get("BasePort", 7777))
         self.max_worlds = int(unity_cfg.get("MaxWorlds", 50))
         self.idle_timeout_minutes = int(unity_cfg.get("IdleTimeoutMinutes", 5))
-        self.server_executable = str(
-            unity_cfg.get("ExecutablePath", "/home/morphis/MorphisServer/Morphis.x86_64")
-        )
-        project_root = Path(__file__).resolve().parents[2]
-        configured_log_dir = str(unity_cfg.get("LogDirectory", "")).strip()
-        if configured_log_dir:
-            log_dir = Path(configured_log_dir)
-            if not log_dir.is_absolute():
-                log_dir = project_root / log_dir
-        else:
-            log_dir = project_root / "logs" / "worlds"
-        self.log_dir = log_dir
+        self.server_executable = get_unity_server_executable()
+        self.server_root = get_unity_server_root()
+        self.log_dir = get_unity_server_log_directory()
         self.backend_url = get_api_base_url()
+
+        try:
+            config_path = ensure_unity_server_runtime_config()
+            logger.info(f"[WorldManager] Unity runtime config: {config_path}")
+        except Exception as e:
+            logger.warning(f"[WorldManager] Failed to prepare Unity config.json: {e}")
         
         # 启动后台清理线程
         self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
         self._cleanup_thread.start()
         
         logger.info(
-            f"[WorldManager] Initialized. Server: {self.server_executable}, Logs: {self.log_dir}"
+            "[WorldManager] Initialized. Server: %s, Root: %s, Logs: %s",
+            self.server_executable,
+            self.server_root,
+            self.log_dir,
         )
     
+    def _validate_server_installation(self) -> Optional[str]:
+        executable = Path(self.server_executable)
+        if not executable.is_file():
+            return f"Unity Server executable not found: {self.server_executable}"
+
+        if not os.access(executable, os.X_OK):
+            return f"Unity Server executable is not executable: {self.server_executable}"
+
+        data_dir = self.server_root / "Morphis_Data"
+        if not data_dir.is_dir():
+            return f"Unity Server data directory not found: {data_dir}"
+
+        player_lib = self.server_root / "UnityPlayer.so"
+        if not player_lib.is_file():
+            return f"UnityPlayer.so not found in server root: {player_lib}"
+
+        return None
+
+    def _read_log_tail(self, log_file: Path, max_lines: int = 20) -> str:
+        if not log_file.exists():
+            return ""
+        try:
+            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            return "\n".join(lines[-max_lines:])
+        except OSError:
+            return ""
+
     def _get_available_port(self, db: Session) -> Optional[int]:
         """分配可用端口"""
         used_ports = set()
@@ -105,11 +136,16 @@ class WorldProcessManager:
                 world.process_id = None
                 db.commit()
         
-        # 检查服务器可执行文件
-        if not os.path.exists(self.server_executable):
+        install_error = self._validate_server_installation()
+        if install_error:
+            return {"status": "error", "message": install_error}
+
+        try:
+            ensure_unity_server_runtime_config()
+        except Exception as e:
             return {
                 "status": "error",
-                "message": f"Unity Server executable not found: {self.server_executable}"
+                "message": f"Failed to prepare Unity Server config.json: {e}",
             }
         
         # 分配端口
@@ -122,6 +158,7 @@ class WorldProcessManager:
         world.port = port
         db.commit()
         
+        log_file = self.log_dir / f"{world_id}.log"
         try:
             # 启动 Unity Server 进程
             # 命令: ./Morphis.x86_64 --mode=server --worldId=xxx -batchmode -nographics
@@ -140,24 +177,34 @@ class WorldProcessManager:
             
             # 日志文件
             self.log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = self.log_dir / f"{world_id}.log"
             
-            with open(log_file, "a") as log:
+            with open(log_file, "a", encoding="utf-8") as log:
+                log.write(
+                    f"\n[{datetime.utcnow().isoformat()}] Starting world '{world_id}' "
+                    f"cwd={self.server_root} port={port}\n"
+                )
                 process = subprocess.Popen(
                     cmd,
+                    cwd=str(self.server_root),
                     env=env,
                     stdout=log,
                     stderr=subprocess.STDOUT,
-                    start_new_session=True  # 独立进程组
+                    start_new_session=True,
                 )
             
             # 等待进程启动（最多 10 秒）
             for _ in range(10):
                 time.sleep(1)
+                if process.poll() is not None:
+                    tail = self._read_log_tail(log_file)
+                    raise RuntimeError(
+                        f"Process exited early with code {process.returncode}. "
+                        f"Log tail:\n{tail}"
+                    )
                 if psutil.pid_exists(process.pid):
                     break
             else:
-                raise Exception("Process failed to start")
+                raise RuntimeError("Process failed to start within timeout")
             
             # 更新数据库
             world.status = WorldStatus.RUNNING
