@@ -93,6 +93,7 @@ env/
 # Configuration files (IMPORTANT: Do not commit production configs)
 config.json
 Backend/.env.local
+Backend/storage/
 
 # Keep example config
 !config.json.example

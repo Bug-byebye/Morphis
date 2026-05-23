@@ -131,10 +131,10 @@ namespace Morphis.WorldSnapshot
         private IEnumerator SaveToServerCoroutine(WorldSnapshot snapshot, Action onSuccess, Action<string> onError)
         {
             var url = GetWorldUrl(snapshot.world_id);
-            var json = JsonUtility.ToJson(snapshot, prettyPrint: false);
+            var json = WorldSnapshotJson.Serialize(snapshot);
             var bodyRaw = Encoding.UTF8.GetBytes(json);
 
-            Debug.Log($"[HttpWorldService] POST {url}");
+            Debug.Log($"[HttpWorldService] POST {url} objects={snapshot.objects?.Count ?? 0}");
 
             using (var req = new UnityWebRequest(url, "POST"))
             {
@@ -240,7 +240,7 @@ namespace Morphis.WorldSnapshot
                 try
                 {
                     var json = req.downloadHandler.text;
-                    var snapshot = JsonUtility.FromJson<WorldSnapshot>(json);
+                    var snapshot = WorldSnapshotJson.Deserialize(json);
 
                     if (snapshot == null)
                     {
@@ -280,7 +280,7 @@ namespace Morphis.WorldSnapshot
             }
 
             var url = GetWorldUrl(snapshot.world_id);
-            var json = JsonUtility.ToJson(snapshot, prettyPrint: false);
+            var json = WorldSnapshotJson.Serialize(snapshot);
             var bodyRaw = Encoding.UTF8.GetBytes(json);
 
             Debug.Log($"[HttpWorldService] (sync) POST {url} objects={snapshot.objects?.Count ?? 0}");

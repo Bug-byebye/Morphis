@@ -614,6 +614,7 @@ from services.human_chat import (
 
 # 导入世界快照路由和数据库初始化
 from routers import world, world_manager
+from routers import assets as assets_router
 from database import init_db, get_db
 from config import (
     get_api_base_url,
@@ -652,6 +653,8 @@ def startup_db():
 app.include_router(world.router)
 # 注册世界进程管理路由
 app.include_router(world_manager.router)
+# 注册资产（GLB）路由
+app.include_router(assets_router.router)
 
 # CORS 中间件 - 允许 Unity 跨域请求
 app.add_middleware(

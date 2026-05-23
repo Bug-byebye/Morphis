@@ -93,7 +93,7 @@ namespace StarterAssets
             if (_serverWorldLoaded)
             {
                 var snapshot = BuildSnapshotFromAuthority();
-                var json = JsonUtility.ToJson(snapshot, prettyPrint: false);
+                var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(snapshot);
                 TargetApplySnapshotJson(connectionToClient, json);
             }
             else
@@ -475,6 +475,11 @@ namespace StarterAssets
         private void CmdRequestSaveWorld()
         {
             EnsureServerWorldId();
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning("[WorldAuthority] Refuse to save: server world not loaded yet (would overwrite DB with empty list).");
+                return;
+            }
             var snapshot = BuildSnapshotFromAuthority();
 
             var http = HttpWorldService.GetOrCreate();
@@ -551,6 +556,11 @@ namespace StarterAssets
             _serverAutosaveCoroutine = null;
 
             EnsureServerWorldId();
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning($"[WorldAuthority] Skip autosave({reason}): world not loaded yet.");
+                yield break;
+            }
             var snapshot = BuildSnapshotFromAuthority();
             var http = HttpWorldService.GetOrCreate();
             http.SaveToServer(
@@ -646,7 +656,7 @@ namespace StarterAssets
         {
             try
             {
-                var snapshot = JsonUtility.FromJson<WorldSnapshot>(snapshotJson);
+                var snapshot = Morphis.WorldSnapshot.WorldSnapshotJson.Deserialize(snapshotJson);
                 if (snapshot == null)
                 {
                     Debug.LogWarning("[WorldAuthority] Snapshot JSON parse returned null");
@@ -705,6 +715,13 @@ namespace StarterAssets
                 return;
             }
 
+            // asset:<sha256> (用户上传到后端的 GLB，先用本地缓存，缺失则 HTTP GET)
+            if (Morphis.WorldSnapshot.AssetCache.IsAssetId(prefabId))
+            {
+                StartCoroutine(LoadAssetGlbAndSpawn(prefabId, objectId, position, rotation, scale, comment));
+                return;
+            }
+
             // prefab from registry/resources
             var prefab = PrefabRegistryManager.GetPrefab(prefabId);
             if (prefab == null)
@@ -721,6 +738,51 @@ namespace StarterAssets
             EnsurePlaceableComponents(instance);
             EnsureWorldObject(instance, objectId, prefabId, comment);
             _clientObjects[objectId] = instance;
+        }
+
+        private System.Collections.IEnumerator LoadAssetGlbAndSpawn(string prefabId, string objectId, Vector3 position, Quaternion rotation, Vector3 scale, string comment)
+        {
+            var sha = Morphis.WorldSnapshot.AssetCache.ExtractSha(prefabId);
+            if (string.IsNullOrEmpty(sha)) yield break;
+
+            bool ok = false; string err = null;
+            yield return Morphis.WorldSnapshot.AssetCache.EnsureCachedCoroutine(sha, (s, e) => { ok = s; err = e; });
+            if (!ok)
+            {
+                Debug.LogWarning($"[WorldAuthority] Asset {sha} not available: {err}");
+                yield break;
+            }
+
+            var bytes = Morphis.WorldSnapshot.AssetCache.LoadBytes(sha);
+            if (bytes == null || bytes.Length == 0) yield break;
+
+            var root = new GameObject(sha.Substring(0, 8));
+            root.transform.position = position;
+            root.transform.rotation = rotation;
+            root.transform.localScale = scale;
+
+            var gltf = new GltfImport();
+            var loadTask = gltf.LoadGltfBinary(bytes);
+            while (!loadTask.IsCompleted) yield return null;
+            if (!loadTask.Result)
+            {
+                Debug.LogWarning($"[WorldAuthority] Failed to load asset GLB: {sha}");
+                UnityEngine.Object.Destroy(root);
+                yield break;
+            }
+
+            var instTask = gltf.InstantiateMainSceneAsync(root.transform);
+            while (!instTask.IsCompleted) yield return null;
+            if (!instTask.Result)
+            {
+                Debug.LogWarning($"[WorldAuthority] Failed to instantiate asset GLB: {sha}");
+                UnityEngine.Object.Destroy(root);
+                yield break;
+            }
+
+            EnsurePlaceableComponents(root);
+            EnsureWorldObject(root, objectId, prefabId, comment);
+            _clientObjects[objectId] = root;
         }
 
         private System.Collections.IEnumerator LoadGlbAndSpawn(string resourceName, string objectId, string prefabId, Vector3 position, Quaternion rotation, Vector3 scale, string comment)
@@ -848,7 +910,7 @@ namespace StarterAssets
             _serverWorldLoaded = true;
 
             // 广播给所有客户端（包括 host）
-            var json = JsonUtility.ToJson(BuildSnapshotFromAuthority(), prettyPrint: false);
+            var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
             RpcApplySnapshotJson(json);
 
             Debug.Log($"[WorldAuthority] Loaded world '{worldId}' from backend. objects={_serverObjects.Count}, v={_serverWorldVersion}");

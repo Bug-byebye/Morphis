@@ -5,6 +5,7 @@ from .user import User
 from .friend import Friendship, FriendRequest, FriendRequestStatus
 from .world import World, WorldMember
 from .world_snapshot import WorldSnapshot
+from .asset import Asset
 
 __all__ = [
     "User",
@@ -14,4 +15,5 @@ __all__ = [
     "World",
     "WorldMember",
     "WorldSnapshot",
+    "Asset",
 ]

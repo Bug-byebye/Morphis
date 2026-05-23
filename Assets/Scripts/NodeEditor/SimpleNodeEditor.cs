@@ -2210,7 +2210,8 @@ namespace AIPipeline.UI
         }
 
         /// <summary>
-        /// 将 Preview 节点中的模型 GLB 写入 Assets/Resources/Placeables，供 ModelLibrary 使用。
+        /// "Add to Bag"：把 Preview 节点的 GLB 加入本地 AssetCache（按 SHA256 命名），
+        /// 已登录时上传到后端（共享世界中可被其他成员可见）。
         /// </summary>
         private void OnAddToBagFromNode(NodeData previewNode)
         {
@@ -2220,29 +2221,23 @@ namespace AIPipeline.UI
                 return;
             }
 
-#if UNITY_EDITOR
-            try
+            var data = previewNode.cachedModelData;
+            var sha = Morphis.WorldSnapshot.AssetCache.StoreBytes(data);
+            if (string.IsNullOrEmpty(sha))
             {
-                const string relDir = "Assets/Resources/Placeables";
-                if (!Directory.Exists(relDir))
-                    Directory.CreateDirectory(relDir);
-
-                var timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var fileName = $"NodePreview_{timestamp}.glb";
-                var fullPath = Path.Combine(relDir, fileName);
-
-                File.WriteAllBytes(fullPath, previewNode.cachedModelData);
-                UnityEditor.AssetDatabase.Refresh();
-
-                UpdateStatus($"Saved to bag: {fileName}");
+                UpdateStatus("Add to bag failed: hash/store error.");
+                return;
             }
-            catch (System.Exception ex)
-            {
-                UpdateStatus($"Add to bag failed: {ex.Message}");
-            }
-#else
-            UpdateStatus("Add to Bag only works in Unity Editor (writes to Assets/Resources/Placeables).");
-#endif
+
+            UpdateStatus($"Added asset {sha.Substring(0, 8)} to bag.");
+            // 后台尝试上传（失败不影响本地）
+            StartCoroutine(Morphis.WorldSnapshot.AssetCache.UploadCoroutine(
+                data,
+                $"bag_{sha.Substring(0, 8)}.glb",
+                (ok, _, err) =>
+                {
+                    if (!ok) Debug.LogWarning($"[NodeEditor] Upload bag asset failed: {err}");
+                }));
         }
         
         private System.Collections.IEnumerator PlaceModelFromNodeCoroutine(NodeData previewNode)
@@ -2317,22 +2312,30 @@ namespace AIPipeline.UI
 
             EnsureInteractionManager();
 
-            string resourcesPath = Application.dataPath + "/Resources/Placeables";
-            if (!System.IO.Directory.Exists(resourcesPath))
+            // 将生成的 GLB 写入 AssetCache（按 SHA256 命名），并打上 asset:<sha> 标签，
+            // 使其能被 WorldSnapshot 正确序列化与还原。共享世界（联机）下还会自动上传到后端。
+            string sha = Morphis.WorldSnapshot.AssetCache.StoreBytes(glbData);
+            if (!string.IsNullOrEmpty(sha))
             {
-                System.IO.Directory.CreateDirectory(resourcesPath);
-            }
+                var prefabId = Morphis.WorldSnapshot.AssetCache.ToAssetPrefabId(sha);
+                Morphis.WorldSnapshot.WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(modelObj, prefabId);
 
-            string filename = $"generated_{System.DateTime.Now.Ticks}.glb";
-            string fullPath = System.IO.Path.Combine(resourcesPath, filename);
-            try
-            {
-                System.IO.File.WriteAllBytes(fullPath, glbData);
-                Debug.Log($"[NodeEditor] Saved generated model to: {fullPath}");
+                // 联机时直接上传，确保其他成员能看到
+                if (Mirror.NetworkClient.active || Mirror.NetworkServer.active)
+                {
+                    StartCoroutine(Morphis.WorldSnapshot.AssetCache.UploadCoroutine(
+                        glbData,
+                        $"generated_{sha.Substring(0, 8)}.glb",
+                        (ok, _, err) =>
+                        {
+                            if (!ok) Debug.LogWarning($"[NodeEditor] Upload asset failed: {err}");
+                        }));
+                }
+                Debug.Log($"[NodeEditor] Stored generated model as asset {sha}");
             }
-            catch (System.Exception e)
+            else
             {
-                Debug.LogError($"[NodeEditor] Failed to save model file: {e.Message}");
+                Debug.LogError("[NodeEditor] Failed to hash/store generated GLB");
             }
 
             UpdateStatus($"Model placed at {modelObj.transform.position}");

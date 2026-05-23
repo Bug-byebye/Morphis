@@ -106,6 +106,14 @@ namespace Morphis.WorldSnapshot
                     continue;
                 }
 
+                // asset:<sha256>：用户上传的 GLB，先用本地缓存，缺失则从后端拉
+                if (AssetCache.IsAssetId(normalizedPrefabId))
+                {
+                    GetCoroutineHost().StartCoroutine(InstantiateAssetGlbAndApply(normalizedPrefabId, objData, parent));
+                    successCount++;
+                    continue;
+                }
+
                 var glbAsset = ResolveGlbAsset(normalizedPrefabId);
                 if (glbAsset != null)
                 {
@@ -149,6 +157,60 @@ namespace Morphis.WorldSnapshot
                 return Resources.Load<TextAsset>($"Placeables/{prefabId}");
 
             return null;
+        }
+
+        private static IEnumerator InstantiateGlbBytesAndApply(byte[] glbBytes, WorldObjectData objData, string prefabId, Transform parent, string nameHint)
+        {
+            if (glbBytes == null || glbBytes.Length == 0) yield break;
+
+            var root = new GameObject(string.IsNullOrEmpty(nameHint) ? "Asset" : nameHint);
+            if (parent != null) root.transform.SetParent(parent, false);
+
+            var gltf = new GltfImport();
+            var loadTask = gltf.LoadGltfBinary(glbBytes);
+            while (!loadTask.IsCompleted) yield return null;
+            if (!loadTask.Result)
+            {
+                Debug.LogWarning($"[WorldSnapshotApplier] Failed to load asset GLB bytes: {prefabId}");
+                UnityEngine.Object.Destroy(root);
+                yield break;
+            }
+
+            var instTask = gltf.InstantiateMainSceneAsync(root.transform);
+            while (!instTask.IsCompleted) yield return null;
+            if (!instTask.Result)
+            {
+                Debug.LogWarning($"[WorldSnapshotApplier] Failed to instantiate asset GLB: {prefabId}");
+                UnityEngine.Object.Destroy(root);
+                yield break;
+            }
+
+            EnsureColliderFromRenderers(root);
+            ApplyObjectData(root, objData, prefabId, null);
+        }
+
+        private static IEnumerator InstantiateAssetGlbAndApply(string prefabId, WorldObjectData objData, Transform parent)
+        {
+            var sha = AssetCache.ExtractSha(prefabId);
+            if (string.IsNullOrEmpty(sha)) yield break;
+
+            // 先确保本地缓存有该资产；若没有则向后端拉取
+            bool ok = false; string err = null;
+            yield return AssetCache.EnsureCachedCoroutine(sha, (success, e) => { ok = success; err = e; });
+            if (!ok)
+            {
+                Debug.LogWarning($"[WorldSnapshotApplier] Asset {sha} not available locally and remote fetch failed: {err}");
+                yield break;
+            }
+
+            var bytes = AssetCache.LoadBytes(sha);
+            if (bytes == null || bytes.Length == 0)
+            {
+                Debug.LogWarning($"[WorldSnapshotApplier] Asset {sha} cached file is empty");
+                yield break;
+            }
+
+            yield return InstantiateGlbBytesAndApply(bytes, objData, prefabId, parent, sha.Substring(0, 8));
         }
 
         private static IEnumerator InstantiateGlbAndApply(TextAsset glbAsset, WorldObjectData objData, string prefabId, Transform parent)

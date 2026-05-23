@@ -49,7 +49,7 @@ namespace Morphis.WorldSnapshot
 
             try
             {
-                var json = JsonUtility.ToJson(snapshot, prettyPrint: true);
+                var json = WorldSnapshotJson.Serialize(snapshot);
                 var filePath = GetFilePath(snapshot.world_id);
 
                 File.WriteAllText(filePath, json);
@@ -88,7 +88,7 @@ namespace Morphis.WorldSnapshot
             try
             {
                 var json = File.ReadAllText(filePath);
-                var snapshot = JsonUtility.FromJson<WorldSnapshot>(json);
+                var snapshot = WorldSnapshotJson.Deserialize(json);
 
                 if (snapshot == null)
                 {
