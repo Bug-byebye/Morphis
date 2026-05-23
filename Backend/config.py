@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
@@ -58,6 +59,65 @@ def get_public_game_server_address() -> str:
 
 def get_unity_server_config() -> Dict[str, Any]:
     return dict(_load_raw_config().get("UnityServer", {}))
+
+
+def get_unity_server_executable() -> str:
+    """Unity Server 可执行文件路径；UNITY_SERVER_PATH 环境变量优先。"""
+    unity_cfg = get_unity_server_config()
+    configured = os.getenv("UNITY_SERVER_PATH") or unity_cfg.get("ExecutablePath", "")
+    if not configured:
+        raise ValueError("Unity Server ExecutablePath is not configured")
+    return str(configured)
+
+
+def get_unity_server_root() -> Path:
+    """Unity Server 部署根目录（含 Morphis_Data、UnityPlayer.so）。"""
+    return Path(get_unity_server_executable()).resolve().parent
+
+
+def get_unity_server_log_directory() -> Path:
+    """World 进程日志目录；相对路径基于 Morphis 项目根目录解析。"""
+    unity_cfg = get_unity_server_config()
+    backend_dir = Path(__file__).resolve().parent
+    project_root = backend_dir.parent
+    configured_log_dir = str(unity_cfg.get("LogDirectory", "")).strip()
+    if configured_log_dir:
+        log_dir = Path(configured_log_dir)
+        if not log_dir.is_absolute():
+            log_dir = project_root / log_dir
+    else:
+        log_dir = project_root / "logs" / "worlds"
+    return log_dir
+
+
+def build_unity_server_config_payload() -> Dict[str, Any]:
+    """从 deploy/server-config.json 生成 Unity Server 所需的 config.json 内容。"""
+    raw = _load_raw_config()
+    unity_cfg = raw.get("UnityServer", {})
+    return {
+        "ApiBaseUrl": get_api_base_url(),
+        "ServerListenAddress": get_server_listen_address(),
+        "ServerPort": int(unity_cfg.get("BasePort", raw.get("ServerPort", 7777))),
+        "DefaultWorldId": str(raw.get("DefaultWorldId", "default-world")),
+    }
+
+
+def ensure_unity_server_runtime_config() -> Path:
+    """
+    在 Unity Server 部署目录写入 config.json（不移动 MorphisServer 到 Morphis 仓库内）。
+    Unity 会从 <MorphisServer>/config.json 读取配置。
+    """
+    config_path = get_unity_server_root() / "config.json"
+    payload = build_unity_server_config_payload()
+    new_content = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+    if config_path.exists():
+        existing = config_path.read_text(encoding="utf-8")
+        if existing.strip() == new_content.strip():
+            return config_path
+
+    config_path.write_text(new_content, encoding="utf-8")
+    return config_path
 
 
 def get_database_url() -> str:

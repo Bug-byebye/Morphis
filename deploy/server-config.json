@@ -12,8 +12,8 @@
     "Password": "Morphis1234"
   },
   "UnityServer": {
-    "ExecutablePath": "/home/rickyfengrui/data/MorphisServer/Morphis.x86_64",
-    "LogDirectory": "/home/rickyfengrui/data/Morphis/logs/worlds",
+    "ExecutablePath": "/srv/MorphisServer/Morphis.x86_64",
+    "LogDirectory": "/srv/Morphis/logs/worlds",
     "BasePort": 7777,
     "MaxWorlds": 50,
     "IdleTimeoutMinutes": 5
