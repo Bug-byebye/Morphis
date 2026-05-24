@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using Mirror;
 using Morphis.AppFlow;
+using StarterAssets;
 
 namespace Morphis
 {
@@ -85,6 +86,8 @@ namespace Morphis
                 Debug.Log("[AppBootstrap] Starting Mirror in SERVER mode (StartServer).");
                 manager.StartServer();
                 _networkStarted = true;
+                // 进程启动后即从数据库预加载世界快照，避免首个玩家连接时仍为空
+                NetworkPlayerSetup.EnsureServerWorldLoadedFromDatabase();
             }
             else
             {

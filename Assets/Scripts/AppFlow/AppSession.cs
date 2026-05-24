@@ -67,14 +67,19 @@ namespace Morphis.AppFlow
             UnityEngine.Debug.Log($"[AppSession] Server connection set: {address}:{port}");
         }
 
-        public static void Clear()
+        public static void ClearWorkspaceSession()
         {
-            Token = null;
-            Username = null;
             WorkspaceId = null;
             WorkspaceName = null;
             ServerAddress = null;
             ServerPort = 0;
+        }
+
+        public static void Clear()
+        {
+            Token = null;
+            Username = null;
+            ClearWorkspaceSession();
         }
     }
 }

@@ -1,5 +1,5 @@
 using UnityEngine;
-using System.Collections.Generic;
+using UnityEngine.Rendering;
 
 namespace Morphis.Utils
 {
@@ -14,6 +14,7 @@ namespace Morphis.Utils
         public static Texture2D GenerateModelPreview(GameObject prefab, int width = 256, int height = 256)
         {
             if (prefab == null) return null;
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return null;
 
             SetupPreviewScene();
 

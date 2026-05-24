@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using LittleDog; // Fix CS0246: PlayerController namespace
+using Morphis;
 #if MORPHIS_APPFLOW
 using Morphis.AppFlow;
 #endif
@@ -34,6 +35,13 @@ namespace Morphis.ModelPlacement
             if (!string.Equals(scene.name, TargetSceneName, System.StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(scene.name, "demo", System.StringComparison.OrdinalIgnoreCase))
                 return;
+
+            // 专用服务器无 GPU/shader，跳过模型库 UI（否则会触发 Camera.Render 报错）
+            if (AppRuntime.IsInitialized && AppRuntime.IsServer)
+            {
+                Debug.Log("[ModelLibraryBootstrap] Skip ModelLibraryUI on dedicated server.");
+                return;
+            }
 
 #if MORPHIS_APPFLOW
             // 仅当已经完成登录并选择了空间后，才显示模型库按钮

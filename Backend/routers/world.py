@@ -2,20 +2,24 @@
 世界快照 API 路由
 """
 import json
+
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 from database import get_db
 from crud.world_snapshot import (
     get_world_snapshot,
     create_or_update_world_snapshot,
+    build_snapshot_body,
 )
+from world_snapshot_logging import log_snapshot_struct, ensure_world_snapshot_logging
 from crud.world import get_or_create_world
 from schemas.world_snapshot import (
     WorldSnapshotPayload,
-    WorldSnapshotResponse,
     WorldSnapshotSimpleResponse,
 )
+
+# 模块加载时即配置日志（早于首个 /world 请求）
+ensure_world_snapshot_logging()
 
 router = APIRouter(prefix="/world", tags=["world"])
 
@@ -48,6 +52,7 @@ async def create_or_update_world(
         get_or_create_world(db=db, world_id=world_id, name=world_id, owner_user_id=None)
         # 将整个 payload 转换为字典作为 snapshot 存储
         snapshot_data = payload.model_dump()
+        log_snapshot_struct("收到客户端(POST)", snapshot_data)
         # 调用 CRUD 操作
         result = create_or_update_world_snapshot(
             db=db,
@@ -55,7 +60,8 @@ async def create_or_update_world(
             snapshot_data=snapshot_data,
             owner_id=None  # 预留字段，暂时为 None
         )
-        
+        log_snapshot_struct("写入数据库(POST)", build_snapshot_body(result))
+
         return WorldSnapshotSimpleResponse(
             world_id=result.world_id,
             version=result.version
@@ -91,8 +97,6 @@ async def get_world(
             detail=f"World '{world_id}' not found"
         )
     # 返回与 Unity 一致的顶层结构：world_id, version, objects
-    body = dict(row.snapshot) if isinstance(row.snapshot, dict) else {}
-    body.setdefault("world_id", row.world_id)
-    body.setdefault("version", row.version)
-    body.setdefault("objects", [])
+    body = build_snapshot_body(row)
+    log_snapshot_struct("传给客户端(GET)", body)
     return Response(content=json.dumps(body), media_type="application/json")

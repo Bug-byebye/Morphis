@@ -113,4 +113,14 @@ def create_workspace_with_coowners(
             db.add(WorldMember(world_id=world_id, user_id=co_user.id))
     db.commit()
     db.refresh(world)
+
+    # 新建空间时写入空快照，保证进入空间时 GET /world 必有服务端记录
+    from crud.world_snapshot import create_or_update_world_snapshot
+    create_or_update_world_snapshot(
+        db=db,
+        world_id=world_id,
+        snapshot_data={"world_id": world_id, "version": 1, "objects": []},
+        owner_id=None,
+    )
+
     return world

@@ -263,6 +263,82 @@ namespace Morphis.WorldSnapshot
         }
 
         /// <summary>
+        /// 同步从服务器加载世界快照（阻塞）。成功返回快照；失败返回 null。
+        /// </summary>
+        public WorldSnapshot LoadFromServerBlocking(string worldId, float timeoutSeconds = 15f, Action<string> onError = null)
+        {
+            if (string.IsNullOrEmpty(worldId))
+            {
+                onError?.Invoke("world_id is null or empty");
+                return null;
+            }
+
+            var url = GetWorldUrl(worldId);
+            Debug.Log($"[HttpWorldService] (sync) GET {url}");
+
+            using (var req = UnityWebRequest.Get(url))
+            {
+                if (IsAppSessionLoggedIn())
+                {
+                    var token = GetAppSessionToken();
+                    if (!string.IsNullOrEmpty(token))
+                        req.SetRequestHeader("Authorization", $"Bearer {token}");
+                }
+
+                var op = req.SendWebRequest();
+                var start = DateTime.UtcNow;
+                while (!op.isDone)
+                {
+                    if ((DateTime.UtcNow - start).TotalSeconds > timeoutSeconds)
+                    {
+                        var err = $"Timeout after {timeoutSeconds:F1}s";
+                        Debug.LogError($"[HttpWorldService] (sync) {err}");
+                        onError?.Invoke(err);
+                        return null;
+                    }
+                    System.Threading.Thread.Sleep(10);
+                }
+
+                if (req.responseCode == 404)
+                {
+                    var err = $"World '{worldId}' snapshot not found on server (HTTP 404)";
+                    Debug.LogError($"[HttpWorldService] (sync) {err}");
+                    onError?.Invoke(err);
+                    return null;
+                }
+
+                if (req.result != UnityWebRequest.Result.Success || req.responseCode >= 400)
+                {
+                    var err = req.result != UnityWebRequest.Result.Success
+                        ? $"Network error: {req.error}"
+                        : $"HTTP {req.responseCode}: {req.downloadHandler.text}";
+                    Debug.LogError($"[HttpWorldService] (sync) {err}");
+                    onError?.Invoke(err);
+                    return null;
+                }
+
+                try
+                {
+                    var snapshot = WorldSnapshotJson.Deserialize(req.downloadHandler.text);
+                    if (snapshot == null)
+                    {
+                        onError?.Invoke("Failed to parse JSON response");
+                        return null;
+                    }
+
+                    Debug.Log(
+                        $"[HttpWorldService] (sync) Loaded '{worldId}' v={snapshot.version} objects={snapshot.objects?.Count ?? 0}");
+                    return snapshot;
+                }
+                catch (Exception e)
+                {
+                    onError?.Invoke($"JSON parse error: {e.Message}");
+                    return null;
+                }
+            }
+        }
+
+        /// <summary>
         /// 同步保存世界快照（阻塞主线程，仅用于 OnApplicationQuit / OnStopServer 等无法等待协程的场合）。
         /// 返回 true 表示已被服务器成功接收（HTTP 2xx）。
         /// </summary>

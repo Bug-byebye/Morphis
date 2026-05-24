@@ -26,10 +26,15 @@ namespace StarterAssets
         // World Authority (Server)
         // =========================
         private static bool _serverWorldLoaded;
+        private static bool _serverWorldLoadStarted;
+        private static bool _serverWorldLoadScheduled;
+        private static bool _serverWorldLoadFailed;
+        private static bool _clientSnapshotReceived;
         private static string _serverWorldId;
         private static int _serverWorldVersion = 1;
         private static readonly Dictionary<string, WorldObjectData> _serverObjects = new Dictionary<string, WorldObjectData>();
         private const float ServerAutosaveDelaySeconds = 0.8f;
+        private const float ClientSnapshotWaitTimeoutSeconds = 10f;
 
         // =========================
         // Client object cache
@@ -89,6 +94,13 @@ namespace StarterAssets
             // 进程退出（idle cleanup SIGTERM / 手动 kill）前同步刷盘，避免 ScheduleServerAutosave 协程被丢弃
             EnsureServerQuitFlushHook();
 
+            if (_serverWorldLoadFailed)
+            {
+                Debug.LogError("[WorldAuthority] Rejecting connection: server failed to load snapshot from database.");
+                connectionToClient?.Disconnect();
+                return;
+            }
+
             // 每个玩家对象都会跑到这里：用于给新加入的客户端下发当前世界快照
             if (_serverWorldLoaded)
             {
@@ -96,10 +108,14 @@ namespace StarterAssets
                 var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(snapshot);
                 TargetApplySnapshotJson(connectionToClient, json);
             }
+            else if (!_serverWorldLoadStarted)
+            {
+                StartCoroutine(ServerLoadWorldFromDatabaseCoroutine());
+            }
             else
             {
-                // 首次启动：由服务器拉取一次数据库快照，并广播给所有客户端
-                StartCoroutine(LoadWorldOnceOnServer());
+                // 另一协程正在从数据库加载，等完成后单独下发给本连接
+                StartCoroutine(WaitForServerWorldThenTargetClient(connectionToClient));
             }
         }
 
@@ -152,15 +168,15 @@ namespace StarterAssets
 
             Local = this;
 
-            // 本地玩家：启用所有输入与运动组件
-            EnableComponents(true);
+            // 在收到服务端快照并应用到场景之前，禁止移动/操作
+            EnableComponents(false);
 
-            // 绑定所有 Cinemachine 虚拟相机的 Follow / LookAt
             SetupCameraForLocalPlayer();
             EnsurePlayerUiAffordances();
             TrySyncDisplayNameFromSession();
+            StartCoroutine(WaitForClientSnapshotOrRequest());
 
-            Debug.Log($"[NetworkPlayerSetup] Local player setup complete: {gameObject.name}");
+            Debug.Log($"[NetworkPlayerSetup] Local player waiting for mandatory server snapshot: {gameObject.name}");
         }
 
         public override void OnStartClient()
@@ -663,6 +679,8 @@ namespace StarterAssets
                     return;
                 }
 
+                _clientSnapshotReceived = true;
+
                 // 清空当前客户端缓存与场景对象（只清空 WorldObject 标记的对象）
                 _clientObjects.Clear();
                 WorldSnapshotApplier.ApplySnapshot(snapshot, clearExisting: true);
@@ -680,10 +698,15 @@ namespace StarterAssets
                 }
 
                 Debug.Log($"[WorldAuthority] Applied snapshot: world='{snapshot.world_id}', objects={snapshot.objects?.Count ?? 0}");
+
+                if (isLocalPlayer)
+                    EnableComponents(true);
             }
             catch (Exception e)
             {
                 Debug.LogWarning($"[WorldAuthority] Failed to apply snapshot JSON: {e.GetType().Name}: {e.Message}");
+                if (isLocalPlayer)
+                    WorldEntryGate.ForceReturnToBoot($"应用场景快照失败: {e.Message}");
             }
         }
 
@@ -851,16 +874,124 @@ namespace StarterAssets
         // =========================
         // Server world load
         // =========================
-        private System.Collections.IEnumerator LoadWorldOnceOnServer()
+
+        /// <summary>
+        /// Dedicated Server 启动 MainScene 后立即从数据库预加载（不必等首个玩家连接）。
+        /// </summary>
+        public static void EnsureServerWorldLoadedFromDatabase()
+        {
+            if (!NetworkServer.active && !(AppRuntime.IsInitialized && AppRuntime.IsServer))
+                return;
+            if (_serverWorldLoaded || _serverWorldLoadScheduled || _serverWorldLoadStarted)
+                return;
+
+            _serverWorldLoadScheduled = true;
+            var host = new GameObject("WorldAuthorityServerLoad(Auto)");
+            UnityEngine.Object.DontDestroyOnLoad(host);
+            host.AddComponent<WorldAuthorityServerLoadHost>();
+        }
+
+        private sealed class WorldAuthorityServerLoadHost : MonoBehaviour
+        {
+            private void Start()
+            {
+                StartCoroutine(ServerLoadWorldFromDatabaseCoroutine());
+            }
+        }
+
+        private static void BroadcastSnapshotToAllClients()
+        {
+            if (!NetworkServer.active) return;
+            var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
+            foreach (var conn in NetworkServer.connections.Values)
+            {
+                if (conn == null || !conn.isReady) continue;
+                var player = conn.identity;
+                if (player == null) continue;
+                var setup = player.GetComponent<NetworkPlayerSetup>();
+                if (setup != null)
+                    setup.TargetApplySnapshotJson(conn, json);
+            }
+        }
+
+        private System.Collections.IEnumerator WaitForServerWorldThenTargetClient(NetworkConnectionToClient target)
+        {
+            var deadline = Time.realtimeSinceStartup + ClientSnapshotWaitTimeoutSeconds;
+            while (!_serverWorldLoaded && Time.realtimeSinceStartup < deadline)
+                yield return null;
+
+            if (target == null || !target.isReady) yield break;
+            if (_serverWorldLoadFailed)
+            {
+                target.Disconnect();
+                yield break;
+            }
+            if (!_serverWorldLoaded)
+            {
+                target.Disconnect();
+                yield break;
+            }
+
+            var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
+            TargetApplySnapshotJson(target, json);
+        }
+
+        private System.Collections.IEnumerator WaitForClientSnapshotOrRequest()
+        {
+            if (!isLocalPlayer || NetworkServer.active) yield break;
+
+            _clientSnapshotReceived = false;
+            var deadline = Time.realtimeSinceStartup + ClientSnapshotWaitTimeoutSeconds;
+            while (!_clientSnapshotReceived && Time.realtimeSinceStartup < deadline)
+                yield return null;
+
+            if (_clientSnapshotReceived) yield break;
+            if (!NetworkClient.active) yield break;
+
+            Debug.LogWarning("[WorldAuthority] Retrying snapshot request from server...");
+            CmdRequestWorldSnapshot();
+
+            deadline = Time.realtimeSinceStartup + 5f;
+            while (!_clientSnapshotReceived && Time.realtimeSinceStartup < deadline)
+                yield return null;
+
+            if (_clientSnapshotReceived) yield break;
+
+            WorldEntryGate.ForceReturnToBoot("未在时限内收到服务端场景快照，已取消进入空间。");
+        }
+
+        [Command]
+        private void CmdRequestWorldSnapshot()
+        {
+            if (!_serverWorldLoaded)
+            {
+                Debug.Log("[WorldAuthority] Snapshot request received but server world not loaded yet.");
+                return;
+            }
+
+            var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
+            TargetApplySnapshotJson(connectionToClient, json);
+            Debug.Log($"[WorldAuthority] Sent snapshot to client on request. objects={_serverObjects.Count}");
+        }
+
+        private System.Collections.IEnumerator ServerLoadWorldFromDatabaseCoroutine()
         {
             if (_serverWorldLoaded) yield break;
+            if (_serverWorldLoadStarted)
+            {
+                while (!_serverWorldLoaded && !_serverWorldLoadFailed)
+                    yield return null;
+                yield break;
+            }
+
+            _serverWorldLoadStarted = true;
 
             EnsureServerWorldId();
             var worldId = _serverWorldId;
             if (string.IsNullOrEmpty(worldId))
             {
-                Debug.LogWarning("[WorldAuthority] Server worldId is empty. Start empty world.");
-                _serverWorldLoaded = true;
+                Debug.LogError("[WorldAuthority] FATAL: Server worldId is empty. Cannot load snapshot from database.");
+                _serverWorldLoadFailed = true;
                 yield break;
             }
 
@@ -868,6 +999,8 @@ namespace StarterAssets
             bool done = false;
             WorldSnapshot loaded = null;
             string error = null;
+
+            Debug.Log($"[WorldAuthority] Loading world '{worldId}' from backend (GET /world)...");
 
             http.LoadFromServer(worldId,
                 onSuccess: s =>
@@ -883,19 +1016,18 @@ namespace StarterAssets
 
             while (!done) yield return null;
 
+            _serverObjects.Clear();
+
             if (loaded == null)
             {
-                if (!string.IsNullOrEmpty(error) && error.Contains("not found", StringComparison.OrdinalIgnoreCase))
-                    Debug.Log($"[WorldAuthority] World '{worldId}' not found on backend. Start empty.");
-                else
-                    Debug.LogWarning($"[WorldAuthority] Load world failed. Start empty. err={error}");
-
-                _serverWorldLoaded = true;
+                Debug.LogError($"[WorldAuthority] FATAL: Cannot load world '{worldId}' from database. err={error}");
+                _serverWorldLoadFailed = true;
+#if !UNITY_EDITOR
+                Application.Quit(1);
+#endif
                 yield break;
             }
 
-            // 写入权威数据
-            _serverObjects.Clear();
             if (loaded.objects != null)
             {
                 foreach (var obj in loaded.objects)
@@ -908,12 +1040,8 @@ namespace StarterAssets
 
             _serverWorldVersion = Mathf.Max(loaded.version, 1);
             _serverWorldLoaded = true;
-
-            // 广播给所有客户端（包括 host）
-            var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
-            RpcApplySnapshotJson(json);
-
             Debug.Log($"[WorldAuthority] Loaded world '{worldId}' from backend. objects={_serverObjects.Count}, v={_serverWorldVersion}");
+            BroadcastSnapshotToAllClients();
         }
 
         private static void EnsureServerWorldId()

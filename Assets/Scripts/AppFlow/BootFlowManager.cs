@@ -16,6 +16,8 @@ using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
 #endif
 
+using Morphis.WorldSnapshot;
+
 namespace Morphis.AppFlow
 {
     /// <summary>
@@ -927,11 +929,49 @@ namespace Morphis.AppFlow
                 }
             }
 
+            // —— 强制从服务端（数据库）拉取场景快照；失败则禁止进入空间 ——
+            WorldEntryGate.Clear();
+            SetStatus("正在从服务器加载场景快照（必须成功）...");
+
+            WorldSnapshot serverSnapshot = null;
+            string snapshotLoadError = null;
+            var loadHost = new GameObject("WorldSnapshotEntryLoad");
+            var http = loadHost.AddComponent<HttpWorldService>();
+            bool snapshotDone = false;
+            http.LoadFromServer(
+                _selectedWorkspaceId,
+                snap =>
+                {
+                    serverSnapshot = snap;
+                    snapshotDone = true;
+                },
+                err =>
+                {
+                    snapshotLoadError = err;
+                    snapshotDone = true;
+                });
+            while (!snapshotDone)
+                yield return null;
+            UnityEngine.Object.Destroy(loadHost);
+
+            if (serverSnapshot == null)
+            {
+                var msg = string.IsNullOrEmpty(snapshotLoadError)
+                    ? "未能从服务器获取场景快照，无法进入空间。"
+                    : $"未能从服务器获取场景快照：{snapshotLoadError}";
+                WorldEntryGate.AbortEntry(msg);
+                SetStatus(msg);
+                _busy = false;
+                yield break;
+            }
+
+            WorldEntryGate.SetValidatedSnapshot(serverSnapshot);
+
             // 保存连接信息到 AppSession
             AppSession.SetWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
             AppSession.SetServerConnection(serverAddress, serverPort);
 
-            SetStatus($"Connecting to {serverAddress}:{serverPort} ...");
+            SetStatus($"场景快照已加载（{serverSnapshot.objects?.Count ?? 0} 个物体），正在连接 {serverAddress}:{serverPort} ...");
 
             // 立即隐藏/销毁 BootScene 的 UI，确保不会在加载过程中显示
             if (_canvas != null)

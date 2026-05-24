@@ -174,6 +174,13 @@ async def auth_register(request: AuthRegisterRequest, db: Session = Depends(get_
     member = WorldMember(world_id=default_world_id, user_id=user.id)
     db.add(member)
     db.commit()
+    from crud.world_snapshot import create_or_update_world_snapshot
+    create_or_update_world_snapshot(
+        db=db,
+        world_id=default_world_id,
+        snapshot_data={"world_id": default_world_id, "version": 1, "objects": []},
+        owner_id=None,
+    )
     token = secrets.token_urlsafe(24)
     _tokens[token] = request.username
     return AuthResponse(token=token, username=request.username)
@@ -646,6 +653,15 @@ app = FastAPI(title="AI Generation Pipeline Server")
 @app.on_event("startup")
 def startup_db():
     """启动时连接数据库并建表；连接失败则抛错并阻止服务启动（不静默失败）"""
+    import logging
+    from world_snapshot_logging import ensure_world_snapshot_logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    ensure_world_snapshot_logging()
     init_db()
 
 
@@ -804,6 +820,13 @@ async def auth_register(request: AuthRegisterRequest, db: Session = Depends(get_
     member = WorldMember(world_id=default_world_id, user_id=user.id)
     db.add(member)
     db.commit()
+    from crud.world_snapshot import create_or_update_world_snapshot
+    create_or_update_world_snapshot(
+        db=db,
+        world_id=default_world_id,
+        snapshot_data={"world_id": default_world_id, "version": 1, "objects": []},
+        owner_id=None,
+    )
     token = secrets.token_urlsafe(24)
     _tokens[token] = request.username
     return AuthResponse(token=token, username=request.username)
@@ -883,6 +906,15 @@ async def join_world(
     
     if not (is_owner or is_member):
         return Response(content="Access denied", status_code=403)
+
+    # 进入空间前必须存在数据库中的场景快照，禁止客户端以空场景等方式回退进入
+    from crud.world_snapshot import get_world_snapshot
+    snapshot_row = get_world_snapshot(db=db, world_id=request.world_id)
+    if not snapshot_row:
+        return Response(
+            content="World snapshot not found in database. Cannot enter workspace.",
+            status_code=404,
+        )
     
     # 启动或获取 World
     from services.world_manager import get_world_manager
@@ -1360,7 +1392,16 @@ async def root():
 
 
 if __name__ == "__main__":
+    import logging
     import uvicorn
+    from world_snapshot_logging import ensure_world_snapshot_logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        force=True,
+    )
+    ensure_world_snapshot_logging()
     print("=" * 50)
     print("AI Generation Pipeline Server")
     print("=" * 50)

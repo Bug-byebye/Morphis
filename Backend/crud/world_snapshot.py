@@ -5,6 +5,16 @@
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 from models.world_snapshot import WorldSnapshot
+from world_snapshot_logging import log_snapshot_struct, log_snapshot_message
+
+
+def build_snapshot_body(row: WorldSnapshot) -> Dict[str, Any]:
+    """构建与 Unity WorldSnapshot 一致的顶层结构 { world_id, version, objects }。"""
+    body = dict(row.snapshot) if isinstance(row.snapshot, dict) else {}
+    body.setdefault("world_id", row.world_id)
+    body.setdefault("version", row.version)
+    body.setdefault("objects", [])
+    return body
 
 
 def get_world_snapshot(db: Session, world_id: str) -> Optional[WorldSnapshot]:
@@ -18,7 +28,13 @@ def get_world_snapshot(db: Session, world_id: str) -> Optional[WorldSnapshot]:
     Returns:
         WorldSnapshot 对象，如果不存在则返回 None
     """
-    return db.query(WorldSnapshot).filter(WorldSnapshot.world_id == world_id).first()
+    row = db.query(WorldSnapshot).filter(WorldSnapshot.world_id == world_id).first()
+    if row:
+        body = build_snapshot_body(row)
+        log_snapshot_struct("从数据库读取", body)
+    else:
+        log_snapshot_message(f"[场景快照] 从数据库读取 | world_id={world_id}，未找到记录")
+    return row
 
 
 def create_or_update_world_snapshot(
@@ -43,8 +59,9 @@ def create_or_update_world_snapshot(
     """
     # 查询现有记录
     existing = db.query(WorldSnapshot).filter(WorldSnapshot.world_id == world_id).first()
-    
+
     if existing:
+        log_snapshot_struct("从数据库读取(更新前)", build_snapshot_body(existing))
         # 更新现有记录
         existing.snapshot = snapshot_data
         existing.version += 1
