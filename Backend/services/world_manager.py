@@ -18,6 +18,7 @@ from config import (
     get_unity_server_log_directory,
     get_unity_server_config,
     ensure_unity_server_runtime_config,
+    ensure_unity_server_permissions,
 )
 import threading
 import logging
@@ -59,6 +60,7 @@ class WorldProcessManager:
         self.backend_url = get_api_base_url()
 
         try:
+            ensure_unity_server_permissions()
             config_path = ensure_unity_server_runtime_config()
             logger.info(f"[WorldManager] Unity runtime config: {config_path}")
         except Exception as e:
@@ -76,6 +78,7 @@ class WorldProcessManager:
         )
     
     def _validate_server_installation(self) -> Optional[str]:
+        ensure_unity_server_permissions()
         executable = Path(self.server_executable)
         if not executable.is_file():
             return f"Unity Server executable not found: {self.server_executable}"

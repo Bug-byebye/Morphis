@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
@@ -73,6 +74,39 @@ def get_unity_server_executable() -> str:
 def get_unity_server_root() -> Path:
     """Unity Server 部署根目录（含 Morphis_Data、UnityPlayer.so）。"""
     return Path(get_unity_server_executable()).resolve().parent
+
+
+def _chmod_executable(path: Path) -> None:
+    mode = path.stat().st_mode
+    if mode & stat.S_IXUSR:
+        return
+    path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def ensure_unity_server_permissions() -> None:
+    """
+    上传部署后 MorphisServer 内二进制可能缺少 +x，启动 World 进程前补齐。
+    覆盖主程序、UnityPlayer.so 及 Morphis_Data 下的 .so 插件。
+    """
+    root = get_unity_server_root()
+    if not root.is_dir():
+        return
+
+    seen: set[Path] = set()
+    candidates = [
+        Path(get_unity_server_executable()),
+        root / "UnityPlayer.so",
+        *root.glob("*.so"),
+        *root.glob("*.so.*"),
+        *root.glob("*.x86_64"),
+        *root.rglob("*.so"),
+    ]
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in seen or not path.is_file():
+            continue
+        seen.add(resolved)
+        _chmod_executable(path)
 
 
 def get_unity_server_log_directory() -> Path:
