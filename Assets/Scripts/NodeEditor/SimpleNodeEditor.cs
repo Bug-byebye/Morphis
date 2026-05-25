@@ -2258,6 +2258,10 @@ namespace AIPipeline.UI
                 yield break;
             }
 
+            // 联机分支：先把 GLB 写入 AssetCache 拿到 sha，再异步上传到后端；
+            // 上传成功后用 RequestPlace 让 World 服务器登记物体 + 广播给所有客户端，避免"只在本机看得到、退出后消失"。
+            bool isNetworked = Mirror.NetworkClient.active || Mirror.NetworkServer.active;
+
             var gltf = new GLTFast.GltfImport();
             var loadTask = gltf.LoadGltfBinary(glbData);
             while (!loadTask.IsCompleted) yield return null;
@@ -2298,6 +2302,74 @@ namespace AIPipeline.UI
             bounds = CalculateBounds(modelObj);
             modelObj.transform.position = new Vector3(spawnPos.x, -bounds.min.y, spawnPos.z);
 
+            // 计算出最终的放置 transform 后，再决定走哪条路径
+            Vector3 finalPos = modelObj.transform.position;
+            Quaternion finalRot = modelObj.transform.rotation;
+            Vector3 finalScale = modelObj.transform.localScale;
+
+            // 把生成的 GLB 写入本地 AssetCache（按 SHA256 命名），拿到 sha 用于 prefab_id
+            string sha = Morphis.WorldSnapshot.AssetCache.StoreBytes(glbData);
+            if (string.IsNullOrEmpty(sha))
+            {
+                Debug.LogError("[NodeEditor] Failed to hash/store generated GLB");
+                Destroy(modelObj);
+                UpdateStatus("放置失败：GLB 哈希/缓存失败。");
+                onComplete?.Invoke(false);
+                yield break;
+            }
+
+            var prefabId = Morphis.WorldSnapshot.AssetCache.ToAssetPrefabId(sha);
+
+            if (isNetworked)
+            {
+                // 联机：销毁本地实例，让 World 服务器走 Cmd→Rpc 重新生成（与模型库放置一致）
+                Destroy(modelObj);
+
+                // 等待上传完成再 RequestPlace，否则其他客户端可能拉不到 GLB
+                bool uploadOk = false;
+                string uploadErr = null;
+                yield return Morphis.WorldSnapshot.AssetCache.UploadCoroutine(
+                    glbData,
+                    $"generated_{sha.Substring(0, 8)}.glb",
+                    (ok, _, err) =>
+                    {
+                        uploadOk = ok;
+                        uploadErr = err;
+                    });
+
+                if (!uploadOk)
+                {
+                    Debug.LogWarning($"[NodeEditor] Upload asset failed: {uploadErr}");
+                    UpdateStatus("放置失败：上传 GLB 到服务器失败。");
+                    onComplete?.Invoke(false);
+                    yield break;
+                }
+
+                if (StarterAssets.NetworkPlayerSetup.Local == null)
+                {
+                    Debug.LogWarning("[NodeEditor] No local player; cannot RequestPlace.");
+                    UpdateStatus("放置失败：没有本地玩家。");
+                    onComplete?.Invoke(false);
+                    yield break;
+                }
+
+                bool placed = StarterAssets.NetworkPlayerSetup.Local.RequestPlace(prefabId, finalPos, finalRot, finalScale);
+                if (!placed)
+                {
+                    Debug.LogWarning("[NodeEditor] RequestPlace was rejected by NetworkPlayerSetup (snapshot not ready?).");
+                    UpdateStatus("放置失败：服务端快照尚未就绪。");
+                    onComplete?.Invoke(false);
+                    yield break;
+                }
+
+                Debug.Log($"[NodeEditor] Networked place via World server: asset:{sha.Substring(0, 8)} at {finalPos}");
+                UpdateStatus($"已请求服务器放置模型 asset:{sha.Substring(0, 8)} (sha={sha.Substring(0, 12)}...)");
+                onComplete?.Invoke(true);
+                yield break;
+            }
+
+            // 单机分支：保留旧路径（本地 Instantiate + 本地 WorldObject，由 WorldSnapshotManager 单机保存）。
+            // 登录态会被 WorldSnapshotManager 内部的 IsLoggedInWorkspaceSession() 阻止本地保存。
             BoxCollider boxCollider = modelObj.AddComponent<BoxCollider>();
             boxCollider.center = bounds.center - modelObj.transform.position;
             boxCollider.size = bounds.size;
@@ -2312,32 +2384,8 @@ namespace AIPipeline.UI
 
             EnsureInteractionManager();
 
-            // 将生成的 GLB 写入 AssetCache（按 SHA256 命名），并打上 asset:<sha> 标签，
-            // 使其能被 WorldSnapshot 正确序列化与还原。共享世界（联机）下还会自动上传到后端。
-            string sha = Morphis.WorldSnapshot.AssetCache.StoreBytes(glbData);
-            if (!string.IsNullOrEmpty(sha))
-            {
-                var prefabId = Morphis.WorldSnapshot.AssetCache.ToAssetPrefabId(sha);
-                Morphis.WorldSnapshot.WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(modelObj, prefabId);
-
-                // 联机时直接上传，确保其他成员能看到
-                if (Mirror.NetworkClient.active || Mirror.NetworkServer.active)
-                {
-                    StartCoroutine(Morphis.WorldSnapshot.AssetCache.UploadCoroutine(
-                        glbData,
-                        $"generated_{sha.Substring(0, 8)}.glb",
-                        (ok, _, err) =>
-                        {
-                            if (!ok) Debug.LogWarning($"[NodeEditor] Upload asset failed: {err}");
-                        }));
-                }
-                Debug.Log($"[NodeEditor] Stored generated model as asset {sha}");
-            }
-            else
-            {
-                Debug.LogError("[NodeEditor] Failed to hash/store generated GLB");
-            }
-
+            Morphis.WorldSnapshot.WorldSnapshotBuilder.EnsureWorldObjectForSnapshot(modelObj, prefabId);
+            Debug.Log($"[NodeEditor] (offline) Stored generated model as asset {sha}");
             UpdateStatus($"Model placed at {modelObj.transform.position}");
             onComplete?.Invoke(true);
         }

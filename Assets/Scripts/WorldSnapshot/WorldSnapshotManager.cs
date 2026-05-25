@@ -118,7 +118,24 @@ namespace Morphis.WorldSnapshot
                 return;
             }
             if (NetworkClient.active)
+            {
+                // 联机客户端：让权威服务端立即同步落库，避免最后一次编辑因 0.8s 防抖丢失；
+                // 然后阻塞短暂时间，给 Mirror 一次出站机会把 Cmd 真的发出去。
+                if (NetworkPlayerSetup.Local != null)
+                {
+                    bool sent = NetworkPlayerSetup.Local.RequestSaveWorldImmediate();
+                    if (sent)
+                    {
+                        // Mirror 默认 tick ~33ms，留 200ms 留够空间让 Cmd 进入出站队列并发出
+                        try { System.Threading.Thread.Sleep(200); } catch { }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[WorldSnapshotManager] RequestSaveWorldImmediate not sent (not local player / no client?).");
+                    }
+                }
                 return;
+            }
 
             if (AppSession.IsLoggedIn)
                 SaveWorldServer(worldId, onError: e => Debug.LogWarning($"[WorldSnapshotManager] Save to server on quit failed: {e}"));
@@ -127,7 +144,13 @@ namespace Morphis.WorldSnapshot
         private void OnApplicationPause(bool pause)
         {
             if (!pause) return;
-            if (NetworkClient.active || NetworkServer.active) return;
+            if (NetworkServer.active) return;
+            if (NetworkClient.active)
+            {
+                if (NetworkPlayerSetup.Local != null)
+                    NetworkPlayerSetup.Local.RequestSaveWorldImmediate();
+                return;
+            }
             if (AppSession.IsLoggedIn)
                 SaveWorldServer(GetCurrentWorldId(), onError: _ => { });
         }

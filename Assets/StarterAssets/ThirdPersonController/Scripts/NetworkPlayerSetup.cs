@@ -396,6 +396,11 @@ namespace StarterAssets
             if (!isLocalPlayer) return false;
             if (!NetworkClient.active) return false;
             if (string.IsNullOrEmpty(prefabId)) return false;
+            if (!_clientSnapshotReceived)
+            {
+                Debug.LogWarning("[NetworkPlayerSetup] RequestPlace rejected: server snapshot not yet received.");
+                return false;
+            }
             CmdRequestPlace(prefabId, position, rotation, scale);
             return true;
         }
@@ -405,6 +410,11 @@ namespace StarterAssets
             if (!isLocalPlayer) return false;
             if (!NetworkClient.active) return false;
             if (string.IsNullOrEmpty(objectId)) return false;
+            if (!_clientSnapshotReceived)
+            {
+                Debug.LogWarning("[NetworkPlayerSetup] RequestMove rejected: server snapshot not yet received.");
+                return false;
+            }
             CmdRequestMove(objectId, position, rotation, scale);
             return true;
         }
@@ -414,6 +424,11 @@ namespace StarterAssets
             if (!isLocalPlayer) return false;
             if (!NetworkClient.active) return false;
             if (string.IsNullOrEmpty(objectId)) return false;
+            if (!_clientSnapshotReceived)
+            {
+                Debug.LogWarning("[NetworkPlayerSetup] RequestDelete rejected: server snapshot not yet received.");
+                return false;
+            }
             CmdRequestDelete(objectId);
             return true;
         }
@@ -426,11 +441,27 @@ namespace StarterAssets
             return true;
         }
 
+        /// <summary>
+        /// 客户端退出前调用：服务端直接同步落库，绕过 0.8s 自动保存防抖，避免最后一次编辑被丢弃。
+        /// </summary>
+        public bool RequestSaveWorldImmediate()
+        {
+            if (!isLocalPlayer) return false;
+            if (!NetworkClient.active) return false;
+            CmdRequestSaveWorldImmediate();
+            return true;
+        }
+
         public bool RequestSetComment(string objectId, string comment)
         {
             if (!isLocalPlayer) return false;
             if (!NetworkClient.active) return false;
             if (string.IsNullOrEmpty(objectId)) return false;
+            if (!_clientSnapshotReceived)
+            {
+                Debug.LogWarning("[NetworkPlayerSetup] RequestSetComment rejected: server snapshot not yet received.");
+                return false;
+            }
             CmdRequestSetComment(objectId, comment ?? string.Empty);
             return true;
         }
@@ -442,6 +473,11 @@ namespace StarterAssets
         private void CmdRequestPlace(string prefabId, Vector3 position, Quaternion rotation, Vector3 scale)
         {
             EnsureServerWorldId();
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning("[WorldAuthority] Reject CmdRequestPlace: world not loaded yet (would be wiped by ServerLoadWorldFromDatabaseCoroutine).");
+                return;
+            }
 
             // 服务器生成权威 object_id
             var data = new WorldObjectData(prefabId, position, rotation, scale)
@@ -465,6 +501,11 @@ namespace StarterAssets
         [Command]
         private void CmdRequestMove(string objectId, Vector3 position, Quaternion rotation, Vector3 scale)
         {
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning("[WorldAuthority] Reject CmdRequestMove: world not loaded yet.");
+                return;
+            }
             if (string.IsNullOrEmpty(objectId)) return;
             if (!_serverObjects.TryGetValue(objectId, out var data)) return;
 
@@ -480,6 +521,11 @@ namespace StarterAssets
         [Command]
         private void CmdRequestDelete(string objectId)
         {
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning("[WorldAuthority] Reject CmdRequestDelete: world not loaded yet.");
+                return;
+            }
             if (string.IsNullOrEmpty(objectId)) return;
             if (!_serverObjects.Remove(objectId)) return;
             _serverWorldVersion++;
@@ -502,6 +548,32 @@ namespace StarterAssets
             http.SaveToServer(snapshot,
                 onSuccess: () => Debug.Log($"[WorldAuthority] Saved world '{snapshot.world_id}' (v{snapshot.version})"),
                 onError: err => Debug.LogWarning($"[WorldAuthority] Save failed: {err}"));
+        }
+
+        /// <summary>
+        /// 客户端退出前调用：同步阻塞落库，确保最后一次编辑不会因 0.8s 防抖被丢弃。
+        /// </summary>
+        [Command]
+        private void CmdRequestSaveWorldImmediate()
+        {
+            EnsureServerWorldId();
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning("[WorldAuthority] Refuse to immediate-save: world not loaded yet.");
+                return;
+            }
+            // 取消已排程的延迟保存
+            if (_serverAutosaveCoroutine != null && _serverAutosaveHost != null)
+            {
+                _serverAutosaveHost.StopCoroutine(_serverAutosaveCoroutine);
+                _serverAutosaveCoroutine = null;
+            }
+            var snapshot = BuildSnapshotFromAuthority();
+            var http = HttpWorldService.GetOrCreate();
+            bool ok = http.SaveToServerBlocking(snapshot,
+                onError: e => Debug.LogWarning($"[WorldAuthority] Immediate save failed: {e}"));
+            if (ok)
+                Debug.Log($"[WorldAuthority] Immediate save ok '{snapshot.world_id}' (v{snapshot.version}, objects={snapshot.objects.Count})");
         }
 
         [Command(channel = Channels.Unreliable)]
@@ -534,6 +606,11 @@ namespace StarterAssets
         [Command]
         private void CmdRequestSetComment(string objectId, string comment)
         {
+            if (!_serverWorldLoaded)
+            {
+                Debug.LogWarning("[WorldAuthority] Reject CmdRequestSetComment: world not loaded yet.");
+                return;
+            }
             if (string.IsNullOrEmpty(objectId)) return;
             if (!_serverObjects.TryGetValue(objectId, out var data)) return;
 
@@ -768,44 +845,93 @@ namespace StarterAssets
             var sha = Morphis.WorldSnapshot.AssetCache.ExtractSha(prefabId);
             if (string.IsNullOrEmpty(sha)) yield break;
 
-            bool ok = false; string err = null;
-            yield return Morphis.WorldSnapshot.AssetCache.EnsureCachedCoroutine(sha, (s, e) => { ok = s; err = e; });
-            if (!ok)
-            {
-                Debug.LogWarning($"[WorldAuthority] Asset {sha} not available: {err}");
-                yield break;
-            }
-
-            var bytes = Morphis.WorldSnapshot.AssetCache.LoadBytes(sha);
-            if (bytes == null || bytes.Length == 0) yield break;
-
+            // 立即创建 root 并注册到 _clientObjects，让早到的 Move/Delete Rpc 能命中。
+            // IsReady=false 期间 PlaceableObjectMover 会拒绝编辑/删除，避免对未加载完成的对象误操作。
             var root = new GameObject(sha.Substring(0, 8));
             root.transform.position = position;
             root.transform.rotation = rotation;
             root.transform.localScale = scale;
 
+            var pendingWorldObj = root.AddComponent<WorldObject>();
+            pendingWorldObj.ObjectId = objectId;
+            pendingWorldObj.PrefabId = prefabId;
+            pendingWorldObj.IsReady = false;
+
+            _clientObjects[objectId] = root;
+
+            // 加载占位提示：一个旋转的半透明立方体 + "加载中..." TextMesh
+            var loadingHint = CreateAssetLoadingHint(root.transform);
+
+            bool ok = false; string err = null;
+            yield return Morphis.WorldSnapshot.AssetCache.EnsureCachedCoroutine(sha, (s, e) => { ok = s; err = e; });
+            if (root == null) yield break; // 期间被 RpcDestroyWorldObject 销毁
+            if (!ok)
+            {
+                Debug.LogWarning($"[WorldAuthority] Asset {sha} not available: {err}");
+                if (loadingHint != null) UnityEngine.Object.Destroy(loadingHint);
+                // root 仍保留在 _clientObjects 中：如果服务端后续发 RpcDestroyWorldObject 可以清理；
+                // 但视觉上没有内容，告知用户加载失败。
+                yield break;
+            }
+
+            var bytes = Morphis.WorldSnapshot.AssetCache.LoadBytes(sha);
+            if (bytes == null || bytes.Length == 0)
+            {
+                if (loadingHint != null) UnityEngine.Object.Destroy(loadingHint);
+                yield break;
+            }
+
             var gltf = new GltfImport();
             var loadTask = gltf.LoadGltfBinary(bytes);
             while (!loadTask.IsCompleted) yield return null;
+            if (root == null) yield break;
             if (!loadTask.Result)
             {
                 Debug.LogWarning($"[WorldAuthority] Failed to load asset GLB: {sha}");
-                UnityEngine.Object.Destroy(root);
+                if (loadingHint != null) UnityEngine.Object.Destroy(loadingHint);
                 yield break;
             }
 
             var instTask = gltf.InstantiateMainSceneAsync(root.transform);
             while (!instTask.IsCompleted) yield return null;
+            if (root == null) yield break;
             if (!instTask.Result)
             {
                 Debug.LogWarning($"[WorldAuthority] Failed to instantiate asset GLB: {sha}");
-                UnityEngine.Object.Destroy(root);
+                if (loadingHint != null) UnityEngine.Object.Destroy(loadingHint);
                 yield break;
             }
 
+            if (loadingHint != null) UnityEngine.Object.Destroy(loadingHint);
+
             EnsurePlaceableComponents(root);
+            // 注意：WorldObject 已经在创建 root 时挂上了，这里 EnsureWorldObject 只更新字段并设置 comment
             EnsureWorldObject(root, objectId, prefabId, comment);
-            _clientObjects[objectId] = root;
+            pendingWorldObj.IsReady = true;
+        }
+
+        private static GameObject CreateAssetLoadingHint(Transform parent)
+        {
+            var hint = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            hint.name = "AssetLoadingHint";
+            // 移除 collider，避免占位影响 raycast 选中
+            var col = hint.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.Destroy(col);
+            hint.transform.SetParent(parent, false);
+            hint.transform.localPosition = Vector3.zero;
+            hint.transform.localScale = Vector3.one * 0.5f;
+
+            var renderer = hint.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+                var mat = new Material(shader);
+                mat.color = new Color(0.4f, 0.7f, 1f, 0.55f);
+                renderer.material = mat;
+            }
+            hint.AddComponent<AssetLoadingHintRotator>();
+            return hint;
         }
 
         private System.Collections.IEnumerator LoadGlbAndSpawn(string resourceName, string objectId, string prefabId, Vector3 position, Quaternion rotation, Vector3 scale, string comment)
@@ -1159,6 +1285,15 @@ namespace StarterAssets
         private void OnDisplayNameChanged(string oldValue, string newValue)
         {
             RefreshPlayerNameTag();
+        }
+    }
+
+    /// <summary>挂在加载占位物体上，让用户能直观看到"正在加载"。</summary>
+    internal sealed class AssetLoadingHintRotator : MonoBehaviour
+    {
+        private void Update()
+        {
+            transform.Rotate(Vector3.up, 90f * Time.deltaTime, Space.World);
         }
     }
 }

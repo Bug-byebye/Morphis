@@ -245,6 +245,14 @@ namespace Morphis.ModelPlacement
                 return;
             }
 
+            // 异步加载中的 asset 物体不允许操作，避免对未就绪对象产生不一致的写入。
+            var worldObj = GetComponent<WorldObject>();
+            if (worldObj != null && !worldObj.IsReady)
+            {
+                Debug.LogWarning($"[PlaceableObjectMover] Object '{name}' is still loading; context menu disabled.");
+                return;
+            }
+
             if (ObjectContextMenu.Instance == null)
             {
                 var menuObj = new GameObject("ObjectContextMenu");
@@ -931,26 +939,37 @@ namespace Morphis.ModelPlacement
 
         private void DeleteObject()
         {
-            if (ObjectInteractionManager.Instance != null)
-                ObjectInteractionManager.ClearTargetsIfExists();
-
-            Debug.Log($"[PlaceableObjectMover] Deleted {name}");
-
             var worldObj = GetComponent<WorldObject>();
+            // 资源未就绪时拒绝删除，避免对未完成异步加载的对象产生不一致状态
+            if (worldObj != null && !worldObj.IsReady)
+            {
+                Debug.LogWarning($"[PlaceableObjectMover] Refuse to delete '{name}': asset is still loading.");
+                return;
+            }
+
             if (NetworkClient.active && NetworkPlayerSetup.Local != null && worldObj != null)
             {
+                // 联机：交给服务端权威删除；本地等待 RpcDestroyWorldObject 实际销毁。
+                // 失败时仅记录日志，不再本地销毁，避免与服务端不一致。
                 bool ok = NetworkPlayerSetup.Local.RequestDelete(worldObj.ObjectId);
                 if (!ok)
                 {
-                    Debug.LogWarning($"[PlaceableObjectMover] RequestDelete failed for object '{worldObj.ObjectId}'. Falling back to local destroy.");
-                    Destroy(gameObject);
-                    RequestServerAutosaveNextFrame();
+                    Debug.LogWarning($"[PlaceableObjectMover] RequestDelete failed for object '{worldObj.ObjectId}'. Will NOT local-destroy; object stays consistent with server.");
+                    return;
                 }
+                // 主动清理高亮/留言 UI 引用，等待 Rpc 真销毁
+                if (ObjectInteractionManager.Instance != null)
+                    ObjectInteractionManager.ClearTargetsIfExists();
+                Debug.Log($"[PlaceableObjectMover] Requested server delete for {name}");
             }
             else
             {
+                // 单机：本地销毁 + 触发本地保存
+                if (ObjectInteractionManager.Instance != null)
+                    ObjectInteractionManager.ClearTargetsIfExists();
                 Destroy(gameObject);
                 RequestServerAutosaveNextFrame();
+                Debug.Log($"[PlaceableObjectMover] Locally deleted {name}");
             }
         }
 

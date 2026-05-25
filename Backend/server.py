@@ -907,14 +907,18 @@ async def join_world(
     if not (is_owner or is_member):
         return Response(content="Access denied", status_code=403)
 
-    # 进入空间前必须存在数据库中的场景快照，禁止客户端以空场景等方式回退进入
-    from crud.world_snapshot import get_world_snapshot
+    # 进入空间前必须存在数据库中的场景快照，禁止客户端以空场景等方式回退进入。
+    # 对历史空间（pre-fix 创建、没有 world_snapshots 行）做一次成员校验后的懒创建，避免老用户被锁在门外。
+    from crud.world_snapshot import get_world_snapshot, create_or_update_world_snapshot
     snapshot_row = get_world_snapshot(db=db, world_id=request.world_id)
     if not snapshot_row:
-        return Response(
-            content="World snapshot not found in database. Cannot enter workspace.",
-            status_code=404,
+        create_or_update_world_snapshot(
+            db=db,
+            world_id=request.world_id,
+            snapshot_data={"world_id": request.world_id, "version": 1, "objects": []},
+            owner_id=None,
         )
+        print(f"[JoinWorld] Lazy-created empty snapshot for legacy world '{request.world_id}'")
     
     # 启动或获取 World
     from services.world_manager import get_world_manager

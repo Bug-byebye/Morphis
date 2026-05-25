@@ -49,6 +49,12 @@ namespace Morphis.WorldSnapshot
             set => _objectId = value;
         }
 
+        /// <summary>
+        /// 该物体的资源是否已就绪（asset:&lt;sha&gt; 异步加载完成才置 true）。
+        /// 非 asset 物体默认 true，不受影响。
+        /// </summary>
+        public bool IsReady { get; set; } = true;
+
         private void Awake()
         {
             // 确保有唯一 ID
