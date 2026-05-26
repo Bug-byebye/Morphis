@@ -1100,7 +1100,7 @@ namespace StarterAssets
             Debug.Log($"[WorldAuthority] Sent snapshot to client on request. objects={_serverObjects.Count}");
         }
 
-        private System.Collections.IEnumerator ServerLoadWorldFromDatabaseCoroutine()
+        private static System.Collections.IEnumerator ServerLoadWorldFromDatabaseCoroutine()
         {
             if (_serverWorldLoaded) yield break;
             if (_serverWorldLoadStarted)

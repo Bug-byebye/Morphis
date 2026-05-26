@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using Mirror;
 using Morphis.AppFlow;
-using StarterAssets;
 
 namespace Morphis
 {
@@ -87,7 +86,7 @@ namespace Morphis
                 manager.StartServer();
                 _networkStarted = true;
                 // 进程启动后即从数据库预加载世界快照，避免首个玩家连接时仍为空
-                NetworkPlayerSetup.EnsureServerWorldLoadedFromDatabase();
+                EnsureServerWorldLoadedFromDatabase();
             }
             else
             {
@@ -136,7 +135,7 @@ namespace Morphis
                 else
                 {
                     // Fallback：如果没有动态地址（例如直接 Play MainScene），使用默认远端服务器
-                    manager.networkAddress = "35.232.83.9";
+                    manager.networkAddress = "47.86.171.174";
                     
                     var telepathy = manager.GetComponent<TelepathyTransport>();
                     if (telepathy != null)
@@ -182,6 +181,28 @@ namespace Morphis
                 Object.Destroy(go);
                 Debug.LogWarning("[AppBootstrap] Failed to locate Morphis.WorldSnapshot.WorldServerReporter type. Player count reporting will be disabled.");
             }
+        }
+
+        private static void EnsureServerWorldLoadedFromDatabase()
+        {
+            var playerSetupType = ResolveType("StarterAssets.NetworkPlayerSetup");
+            if (playerSetupType == null)
+            {
+                Debug.LogWarning("[AppBootstrap] Failed to locate StarterAssets.NetworkPlayerSetup type. Server snapshot preload will be skipped.");
+                return;
+            }
+
+            var method = playerSetupType.GetMethod(
+                "EnsureServerWorldLoadedFromDatabase",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+            if (method == null)
+            {
+                Debug.LogWarning("[AppBootstrap] StarterAssets.NetworkPlayerSetup.EnsureServerWorldLoadedFromDatabase not found.");
+                return;
+            }
+
+            method.Invoke(null, null);
         }
 
         private static System.Type ResolveType(string fullTypeName)

@@ -27,7 +27,7 @@ namespace Morphis.Motion
     public class MDMMotionGenerateUI : MonoBehaviour
     {
         [Header("Server")]
-        [SerializeField] private string generateUrl = "http://35.232.83.9:5000/generate";
+        [SerializeField] private string generateUrl = "http://47.86.171.174:5000/generate";
         [SerializeField] private int requestTimeoutSeconds = 180;
 
         [Header("Generation")]

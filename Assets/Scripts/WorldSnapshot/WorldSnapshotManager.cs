@@ -250,6 +250,7 @@ namespace Morphis.WorldSnapshot
             }
             worldId = worldId ?? GetCurrentWorldId();
             EnsureHttpService().LoadFromServer(
+                worldId,
                 snapshot =>
                 {
                     WorldSnapshotApplier.ApplySnapshot(snapshot, clearExisting: true);

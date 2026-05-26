@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Reflection;
 using System.Text;
 using TMPro;
 using UnityEngine;
@@ -15,8 +16,6 @@ using UnityEditor;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
 #endif
-
-using Morphis.WorldSnapshot;
 
 namespace Morphis.AppFlow
 {
@@ -930,48 +929,29 @@ namespace Morphis.AppFlow
             }
 
             // —— 强制从服务端（数据库）拉取场景快照；失败则禁止进入空间 ——
-            WorldEntryGate.Clear();
+            ClearWorldEntryGate();
             SetStatus("正在从服务器加载场景快照（必须成功）...");
 
-            WorldSnapshot serverSnapshot = null;
-            string snapshotLoadError = null;
-            var loadHost = new GameObject("WorldSnapshotEntryLoad");
-            var http = loadHost.AddComponent<HttpWorldService>();
-            bool snapshotDone = false;
-            http.LoadFromServer(
-                _selectedWorkspaceId,
-                snap =>
-                {
-                    serverSnapshot = snap;
-                    snapshotDone = true;
-                },
-                err =>
-                {
-                    snapshotLoadError = err;
-                    snapshotDone = true;
-                });
-            while (!snapshotDone)
-                yield return null;
-            UnityEngine.Object.Destroy(loadHost);
+            object serverSnapshot = LoadServerSnapshotBlocking(_selectedWorkspaceId, out string snapshotLoadError);
 
             if (serverSnapshot == null)
             {
                 var msg = string.IsNullOrEmpty(snapshotLoadError)
                     ? "未能从服务器获取场景快照，无法进入空间。"
                     : $"未能从服务器获取场景快照：{snapshotLoadError}";
-                WorldEntryGate.AbortEntry(msg);
+                AbortWorldEntry(msg);
                 SetStatus(msg);
                 _busy = false;
                 yield break;
             }
 
-            WorldEntryGate.SetValidatedSnapshot(serverSnapshot);
+            SetValidatedWorldEntrySnapshot(serverSnapshot);
 
             // 保存连接信息到 AppSession
             AppSession.SetWorkspace(_selectedWorkspaceId, _selectedWorkspaceName);
             AppSession.SetServerConnection(serverAddress, serverPort);
 
-            SetStatus($"场景快照已加载（{serverSnapshot.objects?.Count ?? 0} 个物体），正在连接 {serverAddress}:{serverPort} ...");
+            SetStatus($"场景快照已加载（{GetSnapshotObjectCount(serverSnapshot)} 个物体），正在连接 {serverAddress}:{serverPort} ...");
 
             // 立即隐藏/销毁 BootScene 的 UI，确保不会在加载过程中显示
             if (_canvas != null)
@@ -1079,6 +1059,111 @@ namespace Morphis.AppFlow
                     Cursor.visible = true;
                 }
             }
+        }
+
+        private static Type ResolveType(string fullName)
+        {
+            var type = Type.GetType(fullName);
+            if (type != null) return type;
+
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                type = assembly.GetType(fullName);
+                if (type != null) return type;
+            }
+
+            return null;
+        }
+
+        private static Type RequireType(string fullName)
+        {
+            var type = ResolveType(fullName);
+            if (type == null)
+            {
+                throw new InvalidOperationException($"Required type not found: {fullName}");
+            }
+
+            return type;
+        }
+
+        private static void ClearWorldEntryGate()
+        {
+            var gateType = RequireType("Morphis.WorldSnapshot.WorldEntryGate");
+            gateType.GetMethod("Clear", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null);
+        }
+
+        private static void AbortWorldEntry(string message)
+        {
+            var gateType = RequireType("Morphis.WorldSnapshot.WorldEntryGate");
+            gateType.GetMethod("AbortEntry", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, new object[] { message });
+        }
+
+        private static void SetValidatedWorldEntrySnapshot(object snapshot)
+        {
+            var gateType = RequireType("Morphis.WorldSnapshot.WorldEntryGate");
+            var method = gateType.GetMethod("SetValidatedSnapshot", BindingFlags.Public | BindingFlags.Static);
+            method?.Invoke(null, new[] { snapshot });
+        }
+
+        private static object LoadServerSnapshotBlocking(string worldId, out string snapshotLoadError)
+        {
+            snapshotLoadError = null;
+            var serviceType = RequireType("Morphis.WorldSnapshot.HttpWorldService");
+            var loadHost = new GameObject("WorldSnapshotEntryLoad");
+            string capturedError = null;
+
+            try
+            {
+                var service = loadHost.AddComponent(serviceType);
+                var method = serviceType.GetMethod(
+                    "LoadFromServerBlocking",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(string), typeof(float), typeof(Action<string>) },
+                    null);
+
+                if (method == null)
+                {
+                    snapshotLoadError = "HttpWorldService.LoadFromServerBlocking not found";
+                    return null;
+                }
+
+                return method.Invoke(
+                    service,
+                    new object[]
+                    {
+                        worldId,
+                        15f,
+                        new Action<string>(err => capturedError = err)
+                    });
+            }
+            catch (TargetInvocationException e)
+            {
+                snapshotLoadError = e.InnerException?.Message ?? e.Message;
+                return null;
+            }
+            finally
+            {
+                if (snapshotLoadError == null)
+                {
+                    snapshotLoadError = capturedError;
+                }
+                UnityEngine.Object.Destroy(loadHost);
+            }
+        }
+
+        private static int GetSnapshotObjectCount(object snapshot)
+        {
+            if (snapshot == null) return 0;
+
+            var field = snapshot.GetType().GetField("objects", BindingFlags.Public | BindingFlags.Instance);
+            var value = field?.GetValue(snapshot);
+            if (value is ICollection collection)
+            {
+                return collection.Count;
+            }
+
+            return 0;
         }
 
         // ===== workspace list UI =====
