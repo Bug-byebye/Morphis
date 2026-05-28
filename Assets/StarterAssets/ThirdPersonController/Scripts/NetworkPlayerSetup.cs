@@ -33,7 +33,11 @@ namespace StarterAssets
         private static int _serverWorldVersion = 1;
         private static readonly Dictionary<string, WorldObjectData> _serverObjects = new Dictionary<string, WorldObjectData>();
         private const float ServerAutosaveDelaySeconds = 0.8f;
-        private const float ClientSnapshotWaitTimeoutSeconds = 10f;
+        // 客户端等待快照的总预算需要覆盖服务端从数据库加载的最坏情况（含重试）。
+        // 服务端最多 5 次尝试 × 2s + 网络往返，这里给客户端留足 30s。
+        private const float ClientSnapshotWaitTimeoutSeconds = 30f;
+        // 服务端等待世界加载完成再下发给某连接的超时（覆盖加载重试窗口）。
+        private const float ServerWorldReadyWaitTimeoutSeconds = 25f;
 
         // =========================
         // Client object cache
@@ -1052,8 +1056,8 @@ namespace StarterAssets
 
         private System.Collections.IEnumerator WaitForServerWorldThenTargetClient(NetworkConnectionToClient target)
         {
-            var deadline = Time.realtimeSinceStartup + ClientSnapshotWaitTimeoutSeconds;
-            while (!_serverWorldLoaded && Time.realtimeSinceStartup < deadline)
+            var deadline = Time.realtimeSinceStartup + ServerWorldReadyWaitTimeoutSeconds;
+            while (!_serverWorldLoaded && !_serverWorldLoadFailed && Time.realtimeSinceStartup < deadline)
                 yield return null;
 
             if (target == null || !target.isReady) yield break;
@@ -1076,6 +1080,19 @@ namespace StarterAssets
         {
             if (!isLocalPlayer || NetworkServer.active) yield break;
 
+            // 先等几秒：服务端在 OnStartServer 已经主动下发 / 或正在加载。
+            var firstWait = Time.realtimeSinceStartup + 5f;
+            while (!_clientSnapshotReceived && Time.realtimeSinceStartup < firstWait)
+                yield return null;
+
+            if (_clientSnapshotReceived) yield break;
+            if (!NetworkClient.active) yield break;
+
+            // 还没收到：主动请求一次（服务端若仍在加载，会挂起等加载完再下发给本连接）。
+            Debug.LogWarning("[WorldAuthority] Snapshot not received yet; requesting from server...");
+            CmdRequestWorldSnapshot();
+
+            // 继续等待直到总预算耗尽（覆盖服务端从数据库加载 + 重试的最坏情况）。
             var deadline = Time.realtimeSinceStartup + ClientSnapshotWaitTimeoutSeconds;
             while (!_clientSnapshotReceived && Time.realtimeSinceStartup < deadline)
                 yield return null;
@@ -1083,30 +1100,24 @@ namespace StarterAssets
             if (_clientSnapshotReceived) yield break;
             if (!NetworkClient.active) yield break;
 
-            Debug.LogWarning("[WorldAuthority] Retrying snapshot request from server...");
-            CmdRequestWorldSnapshot();
-
-            deadline = Time.realtimeSinceStartup + 5f;
-            while (!_clientSnapshotReceived && Time.realtimeSinceStartup < deadline)
-                yield return null;
-
-            if (_clientSnapshotReceived) yield break;
-
             WorldEntryGate.ForceReturnToBoot("未在时限内收到服务端场景快照，已取消进入空间。");
         }
 
         [Command]
         private void CmdRequestWorldSnapshot()
         {
-            if (!_serverWorldLoaded)
+            if (_serverWorldLoaded)
             {
-                Debug.Log("[WorldAuthority] Snapshot request received but server world not loaded yet.");
+                var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
+                TargetApplySnapshotJson(connectionToClient, json);
+                Debug.Log($"[WorldAuthority] Sent snapshot to client on request. objects={_serverObjects.Count}");
                 return;
             }
 
-            var json = Morphis.WorldSnapshot.WorldSnapshotJson.Serialize(BuildSnapshotFromAuthority());
-            TargetApplySnapshotJson(connectionToClient, json);
-            Debug.Log($"[WorldAuthority] Sent snapshot to client on request. objects={_serverObjects.Count}");
+            // 世界仍在从数据库加载：不要静默丢弃请求，等加载完成后再单独下发给该连接，
+            // 否则客户端会在重试窗口内收不到快照而自我踢出。
+            Debug.Log("[WorldAuthority] Snapshot request received while loading; will deliver once world is ready.");
+            StartCoroutine(WaitForServerWorldThenTargetClient(connectionToClient));
         }
 
         private static System.Collections.IEnumerator ServerLoadWorldFromDatabaseCoroutine()
@@ -1131,52 +1142,61 @@ namespace StarterAssets
             }
 
             var http = HttpWorldService.GetOrCreate();
-            bool done = false;
-            WorldSnapshot loaded = null;
-            string error = null;
+            const int maxAttempts = 5;
+            const float retryDelaySeconds = 2f;
 
-            Debug.Log($"[WorldAuthority] Loading world '{worldId}' from backend (GET /world)...");
-
-            http.LoadFromServer(worldId,
-                onSuccess: s =>
-                {
-                    loaded = s;
-                    done = true;
-                },
-                onError: e =>
-                {
-                    error = e;
-                    done = true;
-                });
-
-            while (!done) yield return null;
-
-            _serverObjects.Clear();
-
-            if (loaded == null)
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                Debug.LogError($"[WorldAuthority] FATAL: Cannot load world '{worldId}' from database. err={error}");
-                _serverWorldLoadFailed = true;
-#if !UNITY_EDITOR
-                Application.Quit(1);
-#endif
-                yield break;
-            }
+                bool done = false;
+                WorldSnapshot loaded = null;
+                string error = null;
 
-            if (loaded.objects != null)
-            {
-                foreach (var obj in loaded.objects)
+                Debug.Log($"[WorldAuthority] Loading world '{worldId}' from backend (GET /world), attempt {attempt}/{maxAttempts}...");
+
+                http.LoadFromServer(worldId,
+                    onSuccess: s =>
+                    {
+                        loaded = s;
+                        done = true;
+                    },
+                    onError: e =>
+                    {
+                        error = e;
+                        done = true;
+                    });
+
+                while (!done) yield return null;
+
+                if (loaded != null)
                 {
-                    if (obj == null) continue;
-                    if (string.IsNullOrEmpty(obj.object_id)) obj.object_id = Guid.NewGuid().ToString();
-                    _serverObjects[obj.object_id] = obj;
+                    _serverObjects.Clear();
+                    if (loaded.objects != null)
+                    {
+                        foreach (var obj in loaded.objects)
+                        {
+                            if (obj == null) continue;
+                            if (string.IsNullOrEmpty(obj.object_id)) obj.object_id = Guid.NewGuid().ToString();
+                            _serverObjects[obj.object_id] = obj;
+                        }
+                    }
+
+                    _serverWorldVersion = Mathf.Max(loaded.version, 1);
+                    _serverWorldLoaded = true;
+                    Debug.Log($"[WorldAuthority] Loaded world '{worldId}' from backend. objects={_serverObjects.Count}, v={_serverWorldVersion}");
+                    BroadcastSnapshotToAllClients();
+                    yield break;
                 }
+
+                Debug.LogWarning($"[WorldAuthority] Load attempt {attempt} failed: {error}. Retrying in {retryDelaySeconds}s...");
+                if (attempt < maxAttempts)
+                    yield return new WaitForSeconds(retryDelaySeconds);
             }
 
-            _serverWorldVersion = Mathf.Max(loaded.version, 1);
-            _serverWorldLoaded = true;
-            Debug.Log($"[WorldAuthority] Loaded world '{worldId}' from backend. objects={_serverObjects.Count}, v={_serverWorldVersion}");
-            BroadcastSnapshotToAllClients();
+            Debug.LogError($"[WorldAuthority] FATAL: Cannot load world '{worldId}' from database after {maxAttempts} attempts.");
+            _serverWorldLoadFailed = true;
+#if !UNITY_EDITOR
+            Application.Quit(1);
+#endif
         }
 
         private static void EnsureServerWorldId()

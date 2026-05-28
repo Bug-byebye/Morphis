@@ -119,21 +119,12 @@ namespace Morphis.WorldSnapshot
             }
             if (NetworkClient.active)
             {
-                // 联机客户端：让权威服务端立即同步落库，避免最后一次编辑因 0.8s 防抖丢失；
-                // 然后阻塞短暂时间，给 Mirror 一次出站机会把 Cmd 真的发出去。
-                if (NetworkPlayerSetup.Local != null)
-                {
-                    bool sent = NetworkPlayerSetup.Local.RequestSaveWorldImmediate();
-                    if (sent)
-                    {
-                        // Mirror 默认 tick ~33ms，留 200ms 留够空间让 Cmd 进入出站队列并发出
-                        try { System.Threading.Thread.Sleep(200); } catch { }
-                    }
-                    else
-                    {
-                        Debug.LogWarning("[WorldSnapshotManager] RequestSaveWorldImmediate not sent (not local player / no client?).");
-                    }
-                }
+                // 联机客户端：编辑已经在发生时即通过 Cmd 应用到服务端权威状态（_serverObjects），
+                // 真正的落库保证来自服务端：
+                //  - 每次编辑触发 0.8s 防抖 autosave（在服务端独立运行，与客户端是否退出无关）
+                //  - 最后一名玩家断开时 OnStopServer → FlushAuthoritySaveBlocking 同步落库
+                // 这里再尽力请求一次立即保存（best-effort），缩短最坏情况下的丢失窗口。
+                NetworkPlayerSetup.Local?.RequestSaveWorldImmediate();
                 return;
             }
 
@@ -147,8 +138,7 @@ namespace Morphis.WorldSnapshot
             if (NetworkServer.active) return;
             if (NetworkClient.active)
             {
-                if (NetworkPlayerSetup.Local != null)
-                    NetworkPlayerSetup.Local.RequestSaveWorldImmediate();
+                NetworkPlayerSetup.Local?.RequestSaveWorldImmediate();
                 return;
             }
             if (AppSession.IsLoggedIn)

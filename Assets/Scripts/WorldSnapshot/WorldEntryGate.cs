@@ -59,6 +59,28 @@ namespace Morphis.WorldSnapshot
                 Mirror.NetworkServer.Shutdown();
 
             AppSession.ClearWorkspaceSession();
+
+            // 关键：重置 AppBootstrap 的"已启动"标志，否则下次进空间不会再调用 StartClient。
+            // 通过反射调用，避免 WorldSnapshot 程序集硬依赖 Bootstrap。
+            try
+            {
+                var t = System.Type.GetType("Morphis.AppBootstrap");
+                if (t == null)
+                {
+                    foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        t = asm.GetType("Morphis.AppBootstrap");
+                        if (t != null) break;
+                    }
+                }
+                t?.GetMethod("ResetForReconnect", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                  ?.Invoke(null, null);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[WorldEntryGate] Failed to reset AppBootstrap: {e.Message}");
+            }
+
             SceneManager.LoadScene("BootScene");
         }
     }

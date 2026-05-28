@@ -19,6 +19,15 @@ namespace Morphis
         private static bool _created;
         private static bool _networkStarted;
 
+        /// <summary>
+        /// 重置 _networkStarted 标志，允许在断线/回到登录后再次调用 StartClient。
+        /// 由 WorldEntryGate.ForceReturnToBoot 或 Mirror 客户端断开事件触发。
+        /// </summary>
+        public static void ResetForReconnect()
+        {
+            _networkStarted = false;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void AutoCreate()
         {
@@ -47,16 +56,38 @@ namespace Morphis
             SceneManager.sceneLoaded -= OnSceneLoaded;
             SceneManager.sceneLoaded += OnSceneLoaded;
 
+            // 客户端断线后允许重新 StartClient（否则用户被踢回登录界面后无法再次进入空间）。
+            if (!AppRuntime.IsServer)
+            {
+                Mirror.NetworkClient.OnDisconnectedEvent -= OnClientDisconnected;
+                Mirror.NetworkClient.OnDisconnectedEvent += OnClientDisconnected;
+            }
+
             TryStartNetworkForActiveScene();
         }
 
         private void OnDestroy()
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            Mirror.NetworkClient.OnDisconnectedEvent -= OnClientDisconnected;
+        }
+
+        private static void OnClientDisconnected()
+        {
+            Debug.Log("[AppBootstrap] Mirror client disconnected. Resetting _networkStarted for next login.");
+            _networkStarted = false;
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            // NetworkClient.Shutdown() 会清空 OnDisconnectedEvent，故每次场景加载都重新订阅，
+            // 保证断线后仍能重置 _networkStarted 以允许重连。
+            if (!AppRuntime.IsServer)
+            {
+                Mirror.NetworkClient.OnDisconnectedEvent -= OnClientDisconnected;
+                Mirror.NetworkClient.OnDisconnectedEvent += OnClientDisconnected;
+            }
+
             TryStartNetworkForActiveScene();
         }
 
@@ -82,11 +113,14 @@ namespace Morphis
                 // 服务器模式：仅启动 Server，不启动 Client，不允许 Host
                 ConfigureNetworkManager(manager);
                 EnsureWorldServerReporter();
+
+                // 先排程世界快照预加载，再 StartServer，避免首个客户端在 _serverWorldLoadStarted 设置前连入。
+                // ServerLoadWorldFromDatabaseCoroutine 是异步的，StartServer 立刻返回不会被阻塞。
+                EnsureServerWorldLoadedFromDatabase();
+
                 Debug.Log("[AppBootstrap] Starting Mirror in SERVER mode (StartServer).");
                 manager.StartServer();
                 _networkStarted = true;
-                // 进程启动后即从数据库预加载世界快照，避免首个玩家连接时仍为空
-                EnsureServerWorldLoadedFromDatabase();
             }
             else
             {

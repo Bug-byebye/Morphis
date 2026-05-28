@@ -61,7 +61,7 @@ namespace Morphis.WorldSnapshot
             return !string.IsNullOrEmpty(p) && File.Exists(p);
         }
 
-        /// <summary>将字节落到本地缓存（按 SHA256 命名），返回 sha256。</summary>
+        /// <summary>将字节落到本地缓存（按 SHA256 命名），返回 sha256；写盘失败返回 null。</summary>
         public static string StoreBytes(byte[] data)
         {
             if (data == null || data.Length == 0) return null;
@@ -74,6 +74,7 @@ namespace Morphis.WorldSnapshot
             catch (Exception e)
             {
                 Debug.LogError($"[AssetCache] StoreBytes failed: {e.Message}");
+                return null;
             }
             return sha;
         }

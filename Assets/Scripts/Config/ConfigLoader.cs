@@ -43,13 +43,23 @@ namespace Morphis.Config
 
                 Validate(data, path);
                 AppConfig.Instance = data;
-                
+
                 // Server 模式：允许环境变量覆盖端口（用于动态端口分配）
                 var envPort = Environment.GetEnvironmentVariable("WORLD_PORT");
                 if (!string.IsNullOrEmpty(envPort) && int.TryParse(envPort, out int port))
                 {
                     data.ServerPort = port;
                     Debug.Log($"[ConfigLoader] Server port overridden by WORLD_PORT env: {port}");
+                }
+
+                // Server 模式：允许环境变量覆盖 Backend API 地址。
+                // 后端 world_manager 以 API_BASE_URL 环境变量启动 Unity Server 进程；
+                // 若部署目录的 config.json 缺失/过期，这里作为权威来源，避免服务端 GET /world 指向错误地址而无法加载快照。
+                var envApiBaseUrl = Environment.GetEnvironmentVariable("API_BASE_URL");
+                if (!string.IsNullOrWhiteSpace(envApiBaseUrl))
+                {
+                    data.ApiBaseUrl = envApiBaseUrl.Trim();
+                    Debug.Log($"[ConfigLoader] ApiBaseUrl overridden by API_BASE_URL env: {data.ApiBaseUrl}");
                 }
 
                 Debug.Log("=== CONFIG LOADED ===");
