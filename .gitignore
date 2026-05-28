@@ -90,8 +90,7 @@ Backend/venv.empty-*/
 ENV/
 env/
 
-# Configuration files (IMPORTANT: Do not commit production configs)
-config.json
+# Configuration files (IMPORTANT: Do not commit production secrets)
 Backend/.env.local
 Backend/storage/
 

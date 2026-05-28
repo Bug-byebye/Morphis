@@ -29,7 +29,6 @@ namespace StarterAssets
         private static bool _serverWorldLoadStarted;
         private static bool _serverWorldLoadScheduled;
         private static bool _serverWorldLoadFailed;
-        private static bool _clientSnapshotReceived;
         private static string _serverWorldId;
         private static int _serverWorldVersion = 1;
         private static readonly Dictionary<string, WorldObjectData> _serverObjects = new Dictionary<string, WorldObjectData>();
@@ -84,6 +83,7 @@ namespace StarterAssets
 
         private bool _isRemoteReplica;
         private bool _hasRemoteState;
+        private bool _clientSnapshotReceived;
         private Vector3 _remoteTargetPosition;
         private Quaternion _remoteTargetRotation = Quaternion.identity;
 
@@ -174,9 +174,17 @@ namespace StarterAssets
             SetupCameraForLocalPlayer();
             EnsurePlayerUiAffordances();
             TrySyncDisplayNameFromSession();
-            StartCoroutine(WaitForClientSnapshotOrRequest());
 
-            Debug.Log($"[NetworkPlayerSetup] Local player waiting for mandatory server snapshot: {gameObject.name}");
+            if (_clientSnapshotReceived)
+            {
+                EnableComponents(true);
+                Debug.Log($"[NetworkPlayerSetup] Local player already has mandatory server snapshot: {gameObject.name}");
+            }
+            else
+            {
+                StartCoroutine(WaitForClientSnapshotOrRequest());
+                Debug.Log($"[NetworkPlayerSetup] Local player waiting for mandatory server snapshot: {gameObject.name}");
+            }
         }
 
         public override void OnStartClient()
@@ -208,6 +216,8 @@ namespace StarterAssets
         public override void OnStopClient()
         {
             base.OnStopClient();
+
+            _clientSnapshotReceived = false;
 
             if (Local == this)
             {
@@ -1066,7 +1076,6 @@ namespace StarterAssets
         {
             if (!isLocalPlayer || NetworkServer.active) yield break;
 
-            _clientSnapshotReceived = false;
             var deadline = Time.realtimeSinceStartup + ClientSnapshotWaitTimeoutSeconds;
             while (!_clientSnapshotReceived && Time.realtimeSinceStartup < deadline)
                 yield return null;

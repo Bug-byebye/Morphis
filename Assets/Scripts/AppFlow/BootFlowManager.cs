@@ -785,7 +785,8 @@ namespace Morphis.AppFlow
             var body = $"{{\"username\":\"{EscapeJson(username)}\",\"password\":\"{EscapeJson(password)}\"}}";
             var bodyRaw = Encoding.UTF8.GetBytes(body);
 
-            LogRequest("POST", url, body);
+            var logBody = $"{{\"username\":\"{EscapeJson(username)}\",\"password\":\"***\"}}";
+            LogRequest("POST", url, logBody);
 
             using (var req = new UnityWebRequest(url, "POST"))
             {
@@ -797,15 +798,18 @@ namespace Morphis.AppFlow
 
                 LogResponse(req);
 
-                if (req.result != UnityWebRequest.Result.Success)
+                if (req.responseCode >= 400)
                 {
-                    SetStatus($"Request failed: {req.error}");
+                    var detail = req.downloadHandler != null && !string.IsNullOrWhiteSpace(req.downloadHandler.text)
+                        ? req.downloadHandler.text
+                        : req.error;
+                    SetStatus($"Auth failed ({req.responseCode}): {detail}");
                     yield break;
                 }
 
-                if (req.responseCode >= 400)
+                if (req.result != UnityWebRequest.Result.Success)
                 {
-                    SetStatus($"Auth failed ({req.responseCode}): {req.downloadHandler.text}");
+                    SetStatus($"Request failed: {req.error}");
                     yield break;
                 }
 
